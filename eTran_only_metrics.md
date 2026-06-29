@@ -107,6 +107,16 @@ cd ~/eTran
 ./configure && make -C eTran
 ```
 
+> **⚠️ Known bugs in micro_kernel and cp_node (affects all measures):**
+> **micro_kernel:**
+> 1. **`-p` flag is documented but non-functional**: The help text claims `[-p Transport protocol (tcp, homa)], default:tcp`, but `-p` is **not in the getopt string** and has no handler. Using it will print an error and exit.
+> 2. **`-q` help default is wrong**: The help text says `default:1` for NIC queues, but the code actually defaults to **20**.
+>
+> **cp_node:**
+> 1. **`--both` default is wrong**: The help text says "(default: 5)" but the actual default when the flag is omitted is **0** (no dual-role, no delay).
+> 2. **`--ports` (client) help default is misleading**: The help displays the global initial value `0`, but the actual runtime default used when the flag is omitted is **1**.
+> 3. **`--pin` (server) description is copy-pasted from client**: The server help says "client threads" but it pins **server threads**, and uses a different offset (+10).
+
 ---
 
 ### MEASURE 1: Homa Microbenchmarks
@@ -179,7 +189,11 @@ LD_PRELOAD=../shared_lib/libetran.so ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=5 ETRA
   LD_PRELOAD=../shared_lib/libetran.so ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=5 ETRAN_NR_NIC_QUEUES=20 ./epoll_client -t 5 -f 100 -o 64 -b 1024 -s -i <IP_node0>
   ```
 * **Throughput (2KB messages)**: change `-b 1024` to `-b 2048`.
-  > **Note**: The `-s` flag in both `epoll_server` and `epoll_client` **disables** the short-response optimization (100B replies), turning the echo server into true same-size echo. This is the intended behavior for throughput benchmarking.
+  > **⚠️ Known bug (both epoll_server and epoll_client):** The `-s` flag **disables** short-response (100B replies), despite the help text claiming it "enables" it. This flag is required for correct throughput benchmarking (full-size echo).
+  >
+  > **⚠️ Known bug (epoll_server only):** The `-d` flag (dump_io_stats) is documented in the help text but is **missing from the getopt string** — using it will cause an error. Additionally, the `-q` flag is accepted but has no runtime effect.
+  >
+  > **⚠️ Known bug (epoll_client only):** The `-l` (max_buf_size) and `-q` (nr_queues) flags are accepted but have no runtime effect.
 
 ---
 
@@ -206,6 +220,11 @@ cd ~/eTran/eTran/tcp_app
 # -t 5 threads, -C 1200 connections/thread = 6K total per client (as per paper)
 LD_PRELOAD=../shared_lib/libetran.so ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=5 ETRAN_NR_NIC_QUEUES=20 ./flexkvs_bench -t 5 -C 1200 -p 32 -n 100000 -v 64 -z 0.9 <IP_node0>:11211
 ```
+> **⚠️ Known bugs in flexkvs_bench:**
+> 1. **`-n` help text is wrong**: The help says `[default 1000]`, but `init_settings()` actually defaults to **100000**. The command above correctly uses `-n 100000`.
+> 2. **`-r` / `--trace` is broken**: Documented but missing a `case 'r':` handler — using it triggers `abort()`. Do not use.
+> 3. **`-C` long option typo**: Help documents `--connns` (triple n), but the actual long option is `--conns` (double n). Use the short form `-C` instead.
+> 4. **Hidden flags**: `-q` (queues) and `-d` (delay) are functional but undocumented.
 
 ---
 
@@ -236,6 +255,10 @@ ETRAN_PROTO=homa ./cp_node client --workload 1000000 --first-server 0 --gbps 8.0
 cd ~/eTran/bench-afxdp
 sudo taskset -c 2 ./xdpsock -i ens1f1np1 -q 2 -t -f 64 -B -N
 ```
+> **⚠️ Known bugs in xdpsock:**
+> 1. **CRASH**: `-I` / `--irq-string` has a conflicting definition: `long_options` says `no_argument` but the handler reads `optarg`. Using the long form `--irq-string` will dereference a NULL pointer and **crash**. Avoid this flag entirely.
+> 2. **`-F` / `--force` vs `--frags`**: The help text documents `--frags`, but the actual long option accepted is `--force`. Use the short form `-F` instead.
+> 3. **`-S` and `-N` documentation**: The help text shows `--xdp-skb=n` and `--xdp-native=n` implying they take an argument, but they do not. Just `-S` or `-N` suffices.
 
 ---
 
