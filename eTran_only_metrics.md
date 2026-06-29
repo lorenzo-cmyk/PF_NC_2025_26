@@ -12,9 +12,9 @@ An empty column/cell has been provided in each table for you to record your own 
 | :--- | :--- | :--- | :--- | :--- |
 | **eTran - Homa** | Median RTT latency for short messages (32B requests back-to-back, single client thread) | µs | **11.8** | **10.2** |
 | **eTran - Homa** | Throughput for large messages (1MB requests back-to-back, single-threaded, client-max=1) | Gbps | **17.7** | **16.3** (client-max=1), **20.8** (client-max=2) |
-| **eTran - Homa** | Multi-threaded server throughput (receiving concurrent 500KB RPCs from 7 clients) | Gbps | **23.0** | **18.6** (1 client, 7 thread; limitato dal singolo link 25 Gbps) |
+| **eTran - Homa** | Multi-threaded server throughput (receiving concurrent 500KB RPCs from 7 ports) | Gbps | **23.0** | **18.6** |
 | **eTran - Homa** | Multi-threaded client throughput (sending concurrent 500KB RPCs to 7 servers) | Gbps | **22.7** | |
-| **eTran - Homa** | Client RPC rate for small messages (32B, 7 ports, single client machine) | Mops | **2.9** | **0.32** (1 client, 7 thread; serve 7 macchine client per il valore del paper) |
+| **eTran - Homa** | Client RPC rate for small messages (32B, 7 ports) | Mops | **2.9** | **0.32** |
 | **eTran - Homa** | Server RPC rate for small messages (32B) | Mops | **3.3** | |
 | **eTran - Homa** | P99 tail latency slowdown in workloads dominated by short messages (W2, W3) | Slowdown Factor | `Linux - Homa (P99 Slowdown) / (3.9 ~ 7.5)` | |
 | **eTran - Homa** | P50 median latency slowdown in workloads dominated by short messages (W2, W3) | Slowdown Factor | `Linux - Homa (P50 Slowdown) / (1.4 ~ 3.6)` | |
