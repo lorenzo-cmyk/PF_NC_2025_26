@@ -58,8 +58,13 @@ I single-thread test li battiamo. Ma il paper è irriproducibile per tre ragioni
 
 2. **Le misure che richiedono hardware specifico (switch, 7+ macchine) non sono fattibili su CloudLab senza un profilo che nessuno riesce a prenotare.** Il paper non menziona da nessuna parte che servono queste risorse.
 
-3. **Il baseline AF_XDP su macchina singola sottoperforma del 48% su hardware identico.** Se non riesco a riprodurre un test che non tocca la rete, il problema è a monte — configurazione BIOS? firmware NIC? patch al driver? Il paper non fornisce nessuna di queste informazioni.
+3. **Sottoperformance sistematica quando c'è carico parallelo sulla NIC.** I single-thread li battiamo (10.2 vs 11.8 µs, 20.8 vs 17.7 Gbps), ma appena c'è parallelismo o saturazione il gap è costante:
+   - AF_XDP tx-only: 7.8 vs 11.55 Mpps (−32%)
+   - Homa 500KB con 7 porte: 18.5 vs 23.0 Gbps (−20%)
+   - Homa RPC rate con 7 porte: 0.45 vs 2.9 Mops (−84%, in parte spiegabile con NAPI)
+   
+   Non è un problema di rete — il test AF_XDP è su macchina singola. E non è un problema di benchmark — sono i binari degli autori. Stesso ferro, stesso kernel, codice loro. Il 32% di gap su un test puramente locale è il sintomo di una differenza sistematica (BIOS, firmware NIC, driver mlx5, parametri di compilazione) che il paper non documenta e che inquina tutte le misure non single-thread.
 
-Secondo me o scriviamo agli autori chiedendo lo script esatto di riproduzione, o contattiamo direttamente gli shepherd di NSDI. Fammi sapere come vuoi procedere.
+Secondo me o scriviamo agli autori chiedendo lo script esatto di riproduzione + la configurazione completa della macchina, o contattiamo gli shepherd di NSDI. Fammi sapere come vuoi procedere.
 
 Ti giro la repo appena vuoi.
