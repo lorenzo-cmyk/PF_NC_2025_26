@@ -132,15 +132,16 @@ cd ~/eTran
 ```sh
 cd ~/eTran/eTran/micro_kernel && sudo ./micro_kernel -i ens1f1np1 -q 20 -w 5 &
 sleep 2
-cd ~/eTran/eTran/homa_app && ./cp_node server
+cd ~/eTran/eTran/homa_app && ETRAN_PROTO=homa ./cp_node server
 ```
+> **⚠️ `ETRAN_PROTO=homa` is MANDATORY for the server too** — without it, the pre-main constructor crashes (segfault).
 
 #### 1b. Server (multi-thread) — for 500KB server throughput + 32B RPC rate:
 ```sh
 # Kill previous server first, then:
 cd ~/eTran/eTran/micro_kernel && sudo ./micro_kernel -i ens1f1np1 -q 20 -w 5 &
 sleep 2
-cd ~/eTran/eTran/homa_app && ./cp_node server --ports 7 --queues 20
+cd ~/eTran/eTran/homa_app && ETRAN_PROTO=homa ./cp_node server --ports 7 --queues 20
 ```
 > The server creates 7 listening threads on ports 4000–4006, handling each client port in parallel.
 
@@ -257,7 +258,7 @@ LD_PRELOAD=../shared_lib/libetran.so ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=5 ETRA
 ```sh
 cd ~/eTran/eTran/micro_kernel && sudo ./micro_kernel -i ens1f1np1 -q 20 -w 5 &
 sleep 2
-cd ~/eTran/eTran/homa_app && ./cp_node server
+cd ~/eTran/eTran/homa_app && ETRAN_PROTO=homa ./cp_node server
 ```
 
 #### 2. On Client (`node1`) with 8 Gbps pacing target:
