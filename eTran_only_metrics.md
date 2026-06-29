@@ -32,7 +32,7 @@ An empty column/cell has been provided in each table for you to record your own 
 | **eTran - TCP** | RTT P99 (tail) latency in Key-Value Store workload (under-loaded server) | µs | **27.5** (equal to `Linux - TCP (KV Latency P99) / 3.2`) | |
 | **eTran - TCP** | Total CPU cycles spent per request (total kcycles, see breakdown below) | kcycles | **4.37** | |
 | **eTran - Homa** | Total CPU cycles spent per request (total kcycles, see breakdown below) | kcycles | **5.48** | |
-| **eTran (Pacing)** | Traffic shaping rate conformance deviation under pacing engine | % | **< 0.4** | |
+| **eTran (Pacing)** | Traffic shaping rate conformance deviation under pacing engine (1MB @ 8 Gbps) | % | **< 0.4** | **~1.5** (1MB, gap=1ms > RTT) |
 | **eTran (Pacing)** | Aggregate throughput for multiple flows with an 8 Gbps target | Mbps | **7950 ~ 8050** | |
 | **eTran - TCP** | Throughput penalty under 1% packet loss | % | **~8** (compared to `~3%` for Linux TCP) | |
 | **eTran - TCP** | Throughput penalty under 5% packet loss | % | **~33** (compared to `~25%` for Linux TCP) | |
