@@ -10,11 +10,11 @@ An empty column/cell has been provided in each table for you to record your own 
 
 | Networking Stack | Measurement Description | Measurement Unit | Expected Value | Measured Value |
 | :--- | :--- | :--- | :--- | :--- |
-| **eTran - Homa** | Median RTT latency for short messages (32B requests back-to-back, single client thread) | µs | **11.8** | **10.2** |
+| **eTran - Homa** | Median RTT latency for short messages (32B requests back-to-back, single client thread) | µs | **11.8** | **10.2** ✅ |
 | **eTran - Homa** | Throughput for large messages (1MB requests back-to-back, single-threaded, client-max=1) | Gbps | **17.7** | **16.3** (client-max=1), **20.8** (client-max=2) |
-| **eTran - Homa** | Multi-threaded server throughput (receiving concurrent 500KB RPCs from 7 ports) | Gbps | **23.0** | ⬜ rerun needed |
+| **eTran - Homa** | Multi-threaded server throughput (receiving concurrent 500KB RPCs from 7 ports) | Gbps | **23.0** | **18.5** (1 NIC) · ⬜ retry 7 NIC |
 | **eTran - Homa** | Multi-threaded client throughput (sending concurrent 500KB RPCs to 7 servers) | Gbps | **22.7** | (needs 8 machines) |
-| **eTran - Homa** | Client RPC rate for small messages (32B, 7 ports) | Mops | **2.9** | ⬜ rerun needed |
+| **eTran - Homa** | Client RPC rate for small messages (32B, 7 ports) | Mops | **2.9** | **0.45** (1 NIC) · ⬜ retry 7 NIC |
 | **eTran - Homa** | Server RPC rate for small messages (32B) | Mops | **3.3** | |
 | **eTran - Homa** | P99 tail latency slowdown in workloads dominated by short messages (W2, W3) | Slowdown Factor | `Linux - Homa (P99 Slowdown) / (3.9 ~ 7.5)` | |
 | **eTran - Homa** | P50 median latency slowdown in workloads dominated by short messages (W2, W3) | Slowdown Factor | `Linux - Homa (P50 Slowdown) / (1.4 ~ 3.6)` | |
