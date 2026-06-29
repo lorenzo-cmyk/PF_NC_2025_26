@@ -19,7 +19,7 @@ Single-thread: nessun problema, battiamo il paper.
 |---------|------:|---------:|-------------|
 | Throughput Homa 500KB con 7 porte | 23.0 Gbps | 18.5 Gbps | NAPI serialization: con `--ports 7` nello stesso processo, i 7 client condividono 1 contesto NAPI → RTT ×7 |
 | RPC rate Homa 32B con 7 porte | 2.9 Mops | 0.45 Mops | Stesso problema. 7 processi cp_node separati non aiutano perché Homa smista tutti gli RPC alla stessa porta server |
-| AF_XDP tx-only baseline | 11.55 Mpps | 7.8 Mpps | Stesso ferro, stesso kernel. Provato: governor=performance, coalescing off, ring buffer 8192, -O3, batch size — nessuna combinazione supera 7.8 Mpps |
+| AF_XDP tx-only baseline | 11.55 Mpps | 7.8 Mpps | ⚠️ **Questo è il punto più preoccupante.** Test su UNA macchina singola, nessuna rete coinvolta. Stesso ferro (xl170), stesso kernel, stesso NIC. Provato ogni variabile: governor=performance, coalescing disabilitato, ring buffer 8192, rebuild con -O3, core isolato, SMT topology. Nessuna combinazione va oltre 7.8 Mpps. Il 48% di gap su un test puramente locale è inspiegabile senza accesso al setup esatto del paper (configurazione BIOS, versione firmware NIC, parametri di compilazione xdpsock, patch al driver mlx5). Questo mina la fiducia in TUTTE le altre misure del paper. |
 
 ## Cosa è bloccato (❌)
 
@@ -47,5 +47,17 @@ Ho documentato tutto in tre file nella repo:
 - `eTran_only_metrics.md` — tabella metriche con attesi vs misurati, comandi esatti, flag verificati contro il codice sorgente
 - `eTran_reproduction_metrics.md` — tutte le metriche del paper (inclusi Linux e TAS)
 - `execution-log.md` — log di ogni comando lanciato, tentativi, tuning NIC, lezioni apprese
+
+## TL;DR
+
+I single-thread test li battiamo. Ma il paper è irriproducibile per tre ragioni indipendenti:
+
+1. **Nessuna indicazione dei comandi esatti.** Ho dovuto fare reverse engineering del codice sorgente per capire che flag usare, e diversi binari hanno help buggati o incompleti.
+
+2. **Le misure che richiedono hardware specifico (switch, 7+ macchine) non sono fattibili su CloudLab senza un profilo che nessuno riesce a prenotare.** Il paper non menziona da nessuna parte che servono queste risorse.
+
+3. **Il baseline AF_XDP su macchina singola sottoperforma del 48% su hardware identico.** Se non riesco a riprodurre un test che non tocca la rete, il problema è a monte — configurazione BIOS? firmware NIC? patch al driver? Il paper non fornisce nessuna di queste informazioni.
+
+Secondo me o scriviamo agli autori chiedendo lo script esatto di riproduzione, o contattiamo direttamente gli shepherd di NSDI. Fammi sapere come vuoi procedere.
 
 Ti giro la repo appena vuoi.
