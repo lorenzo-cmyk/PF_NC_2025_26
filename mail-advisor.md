@@ -2,7 +2,9 @@ Subject: eTran (NSDI '25) — first reproduction attempt: single-thread ok, mult
 
 Ciao [Nome],
 
-ho completato un primo ciclo di riproduzione delle misure di eTran (NSDI '25). Abbiamo due macchine xl170 di CloudLab — stesso identico modello del paper (Xeon E5-2640v4, ConnectX-4 25 Gbps). Il codice compila, i binari funzionano. Ecco lo stato.
+ti aggiorno sulla riproduzione del paper "eTran: Extensible Kernel Transport with eBPF" (NSDI 2025). In breve: gli autori propongono un nuovo stack di trasporto (TCP + Homa) che usa eBPF per bypassare il kernel Linux e ottenere latenze e throughput migliori del kernel nativo. L'hanno accettato a NSDI, conferenza top. Abbiamo preso il loro codice esatto dalla repo ufficiale (`github.com/eTran-NSDI25/eTran`) e lo stiamo eseguendo sui loro stessi benchmark — sono i binari che shippano loro, non roba nostra.
+
+Ho completato un primo ciclo di esecuzione su due macchine xl170 di CloudLab — stesso identico modello del paper (Xeon E5-2640v4, ConnectX-4 25 Gbps). Il codice compila, i binari partono. Ecco lo stato.
 
 ## Cosa funziona e batte il paper (✓)
 
