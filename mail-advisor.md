@@ -23,29 +23,29 @@ Single-thread: nessun problema, battiamo il paper.
 
 ## Cosa è bloccato (❌)
 
-- **Packet loss (§6.4)**: `tc netem` non funziona con XDP/AF_XDP perché i pacchetti bypassano il qdisc del kernel. Il paper avrà usato lo switch Mellanox per l'iniezione di perdita. Con 2 macchine direttamente collegate è irriproducibile.
+- **Packet loss (§6.4)**: `tc netem` non funziona con XDP/AF_XDP perché i pacchetti bypassano il qdisc del kernel. Il paper avrà usato lo switch Mellanox per l'iniezione di perdita. CloudLab richiede accesso diretto allo switch M2410 ma la prenotazione fallisce con "resource unavailable" — ho già provato ogni combinazione di profili e ticket di supporto, senza successo.
 - **Multi-thread tests**: servono 7 NIC fisiche (quindi 7 macchine client) per via del collo di bottiglia NAPI che il paper non menziona da nessuna parte.
 
 ## Problemi di documentazione trovati
 
-1. Il paper non specifica **mai** i flag esatti usati per i test. Esempi:
-   - I test multi-thread richiedono `--client-max` calibrato per evitare overflow UMEM, ma il valore non è mai indicato
+1. Il paper non specifica **mai** i flag esatti usati per i test. I comandi nel paper sono di alto livello ("we ran X"), non riproducibili direttamente. Ho dovuto fare reverse engineering dal codice sorgente (`cp_node.cc`, `micro_kernel.cc`, ecc.) per capire i flag corretti. Esempi concreti:
+   - I test multi-thread richiedono `--client-max` calibrato per evitare overflow UMEM
    - Il server `cp_node` crasha senza `ETRAN_PROTO=homa` (costruttore pre-main) — non documentato
-   - Il pacing funziona solo quando il gap inter-pacchetto supera l'RTT — non documentato
-   - `flexkvs_server` prende argomenti posizionali, non flag getopt — l'help non lo dice
-2. L'help dei binari contiene bug (flag documentati ma non implementati, semantiche invertite, default sbagliati) — vedi file `eTran_only_metrics.md` per l'elenco completo.
+   - Il pacing funziona solo quando il gap inter-pacchetto supera l'RTT — il paper non lo dice
+   - `flexkvs_server` prende argomenti posizionali, non flag getopt — l'help mente
+2. L'help dei binari contiene bug (flag documentati ma non implementati, semantiche invertite, default sbagliati) — vedi repo.
 3. Nessuna indicazione su configurazione NIC (coalescing, governor, ring buffer) che impattano il throughput in modo drastico (da 5.3 a 7.8 Mpps solo col governor).
-4. Nessuna nota sul fatto che `tc netem` è inutile con XDP.
+4. Nessuna nota sul fatto che `tc netem` è inutile con XDP; nessuna nota sul fatto che serve accesso diretto allo switch per le misure di packet loss.
 
 ## Prossimi passi
 
-1. Ottenere altre 5-8 macchine xl170 su CloudLab per i test multi-thread
-2. Capire se esiste un modo di iniettare packet loss senza switch configurabile (forse via eBPF hook custom?)
+1. Ottenere altre 5-8 macchine xl170 per i test multi-thread (le prenotazioni standard su CloudLab funzionano)
+2. Per lo switch: capire se c'è un workaround (script di perdita via eBPF custom sul microkernel?), o se il ticket CloudLab va insistito con spiegazione del perché è bloccante
 3. MEASURE 8 (perf/cicli CPU) la possiamo già fare con 2 macchine
 
-Ho documentato tutto il processo di riproduzione in tre file:
+Ho documentato tutto in tre file nella repo:
 - `eTran_only_metrics.md` — tabella metriche con attesi vs misurati, comandi esatti, flag verificati contro il codice sorgente
 - `eTran_reproduction_metrics.md` — tutte le metriche del paper (inclusi Linux e TAS)
-- `execution-log.md` — log di ogni comando lanciato, tentativi, tuning NIC
+- `execution-log.md` — log di ogni comando lanciato, tentativi, tuning NIC, lezioni apprese
 
 Ti giro la repo appena vuoi.
