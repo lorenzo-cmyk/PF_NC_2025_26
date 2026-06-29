@@ -34,9 +34,9 @@ An empty column/cell has been provided in each table for you to record your own 
 | **eTran - Homa** | Total CPU cycles spent per request (total kcycles, see breakdown below) | kcycles | **5.48** | |
 | **eTran (Pacing)** | Traffic shaping rate conformance deviation under pacing engine (1MB @ 8 Gbps) | % | **< 0.4** | **~1.5** (1MB, gap=1ms > RTT) |
 | **eTran (Pacing)** | Aggregate throughput for multiple flows with an 8 Gbps target | Mbps | **7950 ~ 8050** | |
-| **eTran - TCP** | Throughput penalty under 1% packet loss | % | **~8** (compared to `~3%` for Linux TCP) | |
-| **eTran - TCP** | Throughput penalty under 5% packet loss | % | **~33** (compared to `~25%` for Linux TCP) | |
-| **eTran - Homa** | Throughput penalty under 5% packet loss | % | **~90-100** (comparable with Linux Homa) | |
+| **eTran - TCP** | Throughput penalty under 1% packet loss | % | **~8** | ❌ blocked (tc netem × XDP) |
+| **eTran - TCP** | Throughput penalty under 5% packet loss | % | **~33** | ❌ blocked (tc netem × XDP) |
+| **eTran - Homa** | Throughput penalty under 5% packet loss | % | **~90-100** | ❌ blocked (tc netem × XDP) |
 
 ---
 
@@ -67,7 +67,7 @@ Evaluated on a single core sending 64B packets under stress testing.
 
 | Datapath Configuration | Expected Egress Tpt (Mpps) | Measured Egress Tpt (Mpps) | Relative Throughput Target | Expected Throughput Loss | Measured Throughput Loss |
 | :--- | :---: | :---: | :--- | :---: | :---: |
-| **AF_XDP tx-only** (Baseline) | **11.55** | | *Baseline Value* | — | |
+| **AF_XDP tx-only** (Baseline) | **11.55** | **7.8** | *Baseline Value* | — | |
 | **+ Empty XDP_EGRESS** | **10.79** | | `AF_XDP tx-only × 0.934` | 6.6% | |
 | **+ Out-Of-Order (OOO) Completion** | **9.95** | | `AF_XDP tx-only * 0.861` | 13.9% | |
 | **+ Array Lookup** | **9.71** | | `AF_XDP tx-only * 0.841` | 15.9% | |
@@ -86,17 +86,18 @@ Evaluated across two cores: one core generates ACK/credit packets using `XDP_GEN
 
 All machines should be equipped with 25 Gbps ConnectX-4 NICs, connected to a 25 Gbps switch.
 
-| Measure | Description | Min. Machines | Notes |
-|:---|:---|:---:|:---|
-| **1** | Homa microbenchmarks (all sub-tests) | **2** | Multi-thread tests (`--ports 7`) work on 2 machines when server uses `--ports 7 --queues 20` and client uses `--server-ports 7` |
-| **2** | Homa cluster slowdown (W2–W5) | **10** | All nodes run both client+server via `--both` |
-| **3** | TCP echo throughput | **2** | Paper uses 5 clients for aggregate throughput; 2 machines suffice for relative comparison |
-| **4** | Key-Value Store (Zipf) | **2** | Paper uses 5 clients with 6K connections each; 2 machines test eTran performance at reduced scale |
-| **5** | Rate limiting (pacing) | **2** | — |
-| **6** | XDP_EGRESS overhead | **1** | Standalone, no microkernel |
-| **7** | XDP_GEN packet generation | **1** | Standalone, no microkernel |
-| **8** | CPU cycles (perf) | **2** | — |
-| **9** | Retransmission (packet loss) | **2** | — |
+| Measure | Description | Min. Machines | Status | Notes |
+|:---|:---|:---:|:---:|:---|
+| **1** | Homa microbenchmarks (single-thread) | **2** | ✅ | 10.2 µs, 20.8 Gbps — beats paper |
+| **1** | Homa microbenchmarks (multi-thread) | **7** | ⬜ retry 7 NIC | 18.5 Gbps / 0.45 Mops on 1 NIC |
+| **2** | Homa cluster slowdown (W2–W5) | **10** | ⬜ | |
+| **3** | TCP echo throughput | **2** | ⬜ | |
+| **4** | Key-Value Store (Zipf) | **2** | ⬜ | |
+| **5** | Rate limiting (pacing) | **2** | ✅ | 8.0 Gbps ±1.5% (1MB messages) |
+| **6** | XDP_EGRESS baseline | **1** | ✅ | 7.8 Mpps AF_XDP tx-only |
+| **7** | XDP_GEN packet gen | **1** | ⬜ | |
+| **8** | CPU cycles (perf) | **2** | ⏳ pending | |
+| **9** | Retransmission (packet loss) | **2** | ❌ blocked | tc netem doesn't work with XDP |
 
 > **Important**: Measures 3 and 4 can run on 2 machines, but the **absolute** throughput values will be lower than the paper due to the single client NIC limit. The **relative** gains (eTran vs Linux) should still be measurable.
 
