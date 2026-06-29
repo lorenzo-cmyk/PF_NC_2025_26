@@ -12,7 +12,7 @@ An empty column/cell has been provided in each table for you to record your own 
 | :--- | :--- | :--- | :--- | :--- |
 | **eTran - Homa** | Median RTT latency for short messages (32B requests back-to-back, single client thread) | µs | **11.8** | **10.2** |
 | **eTran - Homa** | Throughput for large messages (1MB requests back-to-back, single-threaded, client-max=1) | Gbps | **17.7** | **16.3** (client-max=1), **20.8** (client-max=2) |
-| **eTran - Homa** | Multi-threaded server throughput (receiving concurrent 500KB RPCs from 7 clients) | Gbps | **23.0** | |
+| **eTran - Homa** | Multi-threaded server throughput (receiving concurrent 500KB RPCs from 7 clients) | Gbps | **23.0** | **18.6** (1 client, 7 thread; limitato dal singolo link 25 Gbps) |
 | **eTran - Homa** | Multi-threaded client throughput (sending concurrent 500KB RPCs to 7 servers) | Gbps | **22.7** | |
 | **eTran - Homa** | Client RPC rate for small messages (32B) | Mops | **2.9** | |
 | **eTran - Homa** | Server RPC rate for small messages (32B) | Mops | **3.3** | |
