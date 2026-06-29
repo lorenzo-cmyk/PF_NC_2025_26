@@ -12,9 +12,9 @@ An empty column/cell has been provided in each table for you to record your own 
 | :--- | :--- | :--- | :--- | :--- |
 | **eTran - Homa** | Median RTT latency for short messages (32B requests back-to-back, single client thread) | µs | **11.8** | **10.2** |
 | **eTran - Homa** | Throughput for large messages (1MB requests back-to-back, single-threaded, client-max=1) | Gbps | **17.7** | **16.3** (client-max=1), **20.8** (client-max=2) |
-| **eTran - Homa** | Multi-threaded server throughput (receiving concurrent 500KB RPCs from 7 ports) | Gbps | **23.0** | **18.6** |
-| **eTran - Homa** | Multi-threaded client throughput (sending concurrent 500KB RPCs to 7 servers) | Gbps | **22.7** | |
-| **eTran - Homa** | Client RPC rate for small messages (32B, 7 ports) | Mops | **2.9** | **0.32** |
+| **eTran - Homa** | Multi-threaded server throughput (receiving concurrent 500KB RPCs from 7 ports) | Gbps | **23.0** | ⬜ rerun needed |
+| **eTran - Homa** | Multi-threaded client throughput (sending concurrent 500KB RPCs to 7 servers) | Gbps | **22.7** | (needs 8 machines) |
+| **eTran - Homa** | Client RPC rate for small messages (32B, 7 ports) | Mops | **2.9** | ⬜ rerun needed |
 | **eTran - Homa** | Server RPC rate for small messages (32B) | Mops | **3.3** | |
 | **eTran - Homa** | P99 tail latency slowdown in workloads dominated by short messages (W2, W3) | Slowdown Factor | `Linux - Homa (P99 Slowdown) / (3.9 ~ 7.5)` | |
 | **eTran - Homa** | P50 median latency slowdown in workloads dominated by short messages (W2, W3) | Slowdown Factor | `Linux - Homa (P50 Slowdown) / (1.4 ~ 3.6)` | |
@@ -67,7 +67,8 @@ Evaluated on a single core sending 64B packets under stress testing.
 
 | Datapath Configuration | Expected Egress Tpt (Mpps) | Measured Egress Tpt (Mpps) | Relative Throughput Target | Expected Throughput Loss | Measured Throughput Loss |
 | :--- | :---: | :---: | :--- | :---: | :---: |
-| **+ Empty XDP_EGRESS** | **10.79** | | `AF_XDP tx-only * 0.934` | 6.6% | |
+| **AF_XDP tx-only** (Baseline) | **11.55** | | *Baseline Value* | — | |
+| **+ Empty XDP_EGRESS** | **10.79** | | `AF_XDP tx-only × 0.934` | 6.6% | |
 | **+ Out-Of-Order (OOO) Completion** | **9.95** | | `AF_XDP tx-only * 0.861` | 13.9% | |
 | **+ Array Lookup** | **9.71** | | `AF_XDP tx-only * 0.841` | 15.9% | |
 | **+ Hashmap Lookup** | **9.10** | | `AF_XDP tx-only * 0.788` | 21.2% | |
@@ -202,7 +203,7 @@ cd ~/eTran/eTran/tcp_app
 LD_PRELOAD=../shared_lib/libetran.so ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=5 ETRAN_NR_NIC_QUEUES=20 ./epoll_server -t 5 -b 1024 -s
 ```
 
-#### 2. On each Client (`node1`..`node5`):
+#### 2. On Client (`node1`):
 * **Throughput (1KB messages)**:
   ```sh
   cd ~/eTran/eTran/micro_kernel && sudo ./micro_kernel -i ens1f1np1 -q 20 &
@@ -233,12 +234,12 @@ cd ~/eTran/eTran/tcp_app
 LD_PRELOAD=../shared_lib/libetran.so ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=5 ETRAN_NR_NIC_QUEUES=20 ./flexkvs_server /dev/null 5 20
 ```
 
-#### 2. On each Client (`node1`..`node5`):
+#### 2. On Client (`node1`):
 ```sh
 cd ~/eTran/eTran/micro_kernel && sudo ./micro_kernel -i ens1f1np1 -q 20 &
 sleep 2
 cd ~/eTran/eTran/tcp_app
-# -t 5 threads, -C 1200 connections/thread = 6K total per client (as per paper)
+# -t 5 threads, -C 1200 connections/thread = 6K total (6K per client as per paper)
 LD_PRELOAD=../shared_lib/libetran.so ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=5 ETRAN_NR_NIC_QUEUES=20 ./flexkvs_bench -t 5 -C 1200 -p 32 -n 100000 -v 64 -z 0.9 <IP_node0>:11211
 ```
 > **⚠️ Known bugs in flexkvs_bench:**
