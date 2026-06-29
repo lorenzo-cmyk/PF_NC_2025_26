@@ -179,18 +179,23 @@ LD_PRELOAD=../shared_lib/libetran.so ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=5 ETRA
   LD_PRELOAD=../shared_lib/libetran.so ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=5 ETRAN_NR_NIC_QUEUES=20 ./epoll_client -t 5 -f 100 -o 64 -b 1024 -s -i <IP_node0>
   ```
 * **Throughput (2KB messages)**: change `-b 1024` to `-b 2048`.
+  > **Note**: The `-s` flag in both `epoll_server` and `epoll_client` **disables** the short-response optimization (100B replies), turning the echo server into true same-size echo. This is the intended behavior for throughput benchmarking.
 
 ---
 
 ### MEASURE 4: Key-Value Store
 * **Setup**: 6 physical machines (`node0` as server, `node1`..`node5` as clients).
+* **Paper reference**: 5 clients, 6K connections per client, 32 outstanding requests/connection, Zipf s=0.9, 100K keys, 32B keys, 64B values, 9:1 GET:SET.
+* **Connection math**: The paper states 6K connections per client. With `-t 5` threads, use `-C 1200` (5 × 1200 = 6000). Alternatively, use `-t 1 -C 6000` for single-threaded client.
 
 #### 1. On Server (`node0`):
 ```sh
 cd ~/eTran/eTran/micro_kernel && sudo ./micro_kernel -i ens1f1np1 -q 20 &
 sleep 2
 cd ~/eTran/eTran/tcp_app
-LD_PRELOAD=../shared_lib/libetran.so ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=5 ETRAN_NR_NIC_QUEUES=20 ./flexkvs_server -t 5
+# flexkvs_server takes 3 POSITIONAL arguments: CONFIG_PATH THREADS QUEUES
+# (mtcp_init is behind #ifdef USE_MTCP, so the config path is stored but unused)
+LD_PRELOAD=../shared_lib/libetran.so ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=5 ETRAN_NR_NIC_QUEUES=20 ./flexkvs_server /dev/null 5 20
 ```
 
 #### 2. On each Client (`node1`..`node5`):
@@ -198,7 +203,8 @@ LD_PRELOAD=../shared_lib/libetran.so ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=5 ETRA
 cd ~/eTran/eTran/micro_kernel && sudo ./micro_kernel -i ens1f1np1 -q 20 &
 sleep 2
 cd ~/eTran/eTran/tcp_app
-LD_PRELOAD=../shared_lib/libetran.so ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=5 ETRAN_NR_NIC_QUEUES=20 ./flexkvs_bench -t 5 -C 6000 -p 32 -n 100000 -v 64 -z 0.9 <IP_node0>:11211
+# -t 5 threads, -C 1200 connections/thread = 6K total per client (as per paper)
+LD_PRELOAD=../shared_lib/libetran.so ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=5 ETRAN_NR_NIC_QUEUES=20 ./flexkvs_bench -t 5 -C 1200 -p 32 -n 100000 -v 64 -z 0.9 <IP_node0>:11211
 ```
 
 ---
