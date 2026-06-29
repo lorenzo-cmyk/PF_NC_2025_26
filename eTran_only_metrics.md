@@ -83,16 +83,21 @@ Evaluated across two cores: one core generates ACK/credit packets using `XDP_GEN
 
 ## 4. Minimum Required Physical Machines for Reproduction
 
-To successfully reproduce the performance benchmarks presented in the paper, ensure you have the appropriate number of dedicated physical servers (ideally equipped with 25 Gbps ConnectX-4 NICs and connected to a 25 Gbps switch):
+All machines should be equipped with 25 Gbps ConnectX-4 NICs, connected to a 25 Gbps switch.
 
-* **Single-Stream Microbenchmarks (Median Latency, 1MB Large Throughput, CPU Cycle Breakdown, and eBPF Hook Performance)**:
-  * **Minimum required**: **2 Physical Machines** (1 Server, 1 Client).
-* **Multi-threaded Key-Value Store Workloads (Zipf KV Workload)**:
-  * **Minimum required**: **6 Physical Machines** (1 Server, 5 Clients) - to reproduce the 6K persistent connections from 5 client machines.
-* **Concurrent Multi-threaded Client / Server Throughput**:
-  * **Minimum required**: **8 Physical Machines** (1 Server and 7 Clients to issue concurrent RPCs, or 1 Client and 7 Servers to sink concurrent RPCs).
-* **Cluster Benchmarks (Homa workloads W2 to W5)**:
-  * **Minimum required**: **10 Physical Machines** (All 10 nodes acting as both multi-threaded clients and servers concurrently).
+| Measure | Description | Min. Machines | Notes |
+|:---|:---|:---:|:---|
+| **1** | Homa microbenchmarks (all sub-tests) | **2** | Multi-thread tests (`--ports 7`) work on 2 machines when server uses `--ports 7 --queues 20` and client uses `--server-ports 7` |
+| **2** | Homa cluster slowdown (W2–W5) | **10** | All nodes run both client+server via `--both` |
+| **3** | TCP echo throughput | **2** | Paper uses 5 clients for aggregate throughput; 2 machines suffice for relative comparison |
+| **4** | Key-Value Store (Zipf) | **2** | Paper uses 5 clients with 6K connections each; 2 machines test eTran performance at reduced scale |
+| **5** | Rate limiting (pacing) | **2** | — |
+| **6** | XDP_EGRESS overhead | **1** | Standalone, no microkernel |
+| **7** | XDP_GEN packet generation | **1** | Standalone, no microkernel |
+| **8** | CPU cycles (perf) | **2** | — |
+| **9** | Retransmission (packet loss) | **2** | — |
+
+> **Important**: Measures 3 and 4 can run on 2 machines, but the **absolute** throughput values will be lower than the paper due to the single client NIC limit. The **relative** gains (eTran vs Linux) should still be measurable.
 
 ---
 
@@ -122,33 +127,50 @@ cd ~/eTran
 ### MEASURE 1: Homa Microbenchmarks
 * **Setup**: 2 physical machines (`node0` as server, `node1` as client).
 
-#### 1. On Server (`node0`):
+#### 1a. Server (single-thread) — for latency 32B + throughput 1MB:
 ```sh
 cd ~/eTran/eTran/micro_kernel && sudo ./micro_kernel -i ens1f1np1 -q 20 -w 5 &
 sleep 2
 cd ~/eTran/eTran/homa_app && ./cp_node server
 ```
 
+#### 1b. Server (multi-thread) — for 500KB server throughput + 32B RPC rate:
+```sh
+# Kill previous server first, then:
+cd ~/eTran/eTran/micro_kernel && sudo ./micro_kernel -i ens1f1np1 -q 20 -w 5 &
+sleep 2
+cd ~/eTran/eTran/homa_app && ./cp_node server --ports 7 --queues 20
+```
+> The server creates 7 listening threads on ports 4000–4006, handling each client port in parallel.
+
 #### 2. On Client (`node1`):
-* **Median Latency (32B)**:
+
+* **Median Latency (32B, single-thread)**:
   ```sh
   cd ~/eTran/eTran/micro_kernel && sudo ./micro_kernel -i ens1f1np1 -q 20 -w 5 &
   sleep 2
   cd ~/eTran/eTran/homa_app
   ETRAN_PROTO=homa ./cp_node client --workload 32 --first-server 0 --one-way
   ```
-* **Throughput (1MB)**:
+
+* **Throughput (1MB, single-thread)** — use `--client-max 2` to saturate the pipeline:
   ```sh
-  ETRAN_PROTO=homa ./cp_node client --workload 1000000 --first-server 0 --one-way
+  ETRAN_PROTO=homa ./cp_node client --workload 1000000 --first-server 0 --one-way --client-max 2
   ```
-* **Server Throughput (7 clients, 500KB)**:
+
+* **Server Throughput (7 ports, 500KB)** — requires multi-thread server (1b):
   ```sh
-  ETRAN_PROTO=homa ./cp_node client --workload 500000 --ports 7 --queues 20 --first-server 0 --one-way
+  ETRAN_PROTO=homa ./cp_node client --workload 500000 --ports 7 --queues 20 \
+    --first-server 0 --one-way --server-ports 7 --client-max 14
   ```
-* **Client RPC Rate (7 clients, 32B)**:
+  > `client_port_max = max(14/7, 1) = 2` per port → 14 outstanding total. Should saturate 25 Gbps link.
+
+* **Client RPC Rate (7 ports, 32B)** — requires multi-thread server (1b):
   ```sh
-  ETRAN_PROTO=homa ./cp_node client --workload 32 --ports 7 --queues 20 --first-server 0 --one-way
+  ETRAN_PROTO=homa ./cp_node client --workload 32 --ports 7 --queues 20 \
+    --first-server 0 --one-way --server-ports 7 --client-max 35
   ```
+  > `client_port_max = max(35/7, 1) = 5` per port → 35 outstanding total. Aiming for ~2.9 Mops at ~12 µs RTT.
 
 ---
 
@@ -170,7 +192,7 @@ dump_times w4.txt
 ---
 
 ### MEASURE 3: TCP Echo Throughput
-* **Setup**: 6 physical machines (`node0` as server, `node1`..`node5` as clients).
+* **Setup**: 2 physical machines (`node0` as server, `node1` as client). The paper uses 5 clients for aggregate throughput; with 2 machines the absolute throughput will be lower but the relative eTran gain is still measurable.
 
 #### 1. On Server (`node0`):
 ```sh
@@ -198,9 +220,8 @@ LD_PRELOAD=../shared_lib/libetran.so ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=5 ETRA
 ---
 
 ### MEASURE 4: Key-Value Store
-* **Setup**: 6 physical machines (`node0` as server, `node1`..`node5` as clients).
-* **Paper reference**: 5 clients, 6K connections per client, 32 outstanding requests/connection, Zipf s=0.9, 100K keys, 32B keys, 64B values, 9:1 GET:SET.
-* **Connection math**: The paper states 6K connections per client. With `-t 5` threads, use `-C 1200` (5 × 1200 = 6000). Alternatively, use `-t 1 -C 6000` for single-threaded client.
+* **Setup**: 2 physical machines (`node0` as server, `node1` as client). The paper uses 5 clients with 6K connections each (total 30K); with 2 machines run 1 client at 6K connections.
+* **Paper reference**: 5 clients, 6K connections per client, 32 outstanding/conn, Zipf s=0.9, 100K keys, 32B keys, 64B values, 9:1 GET:SET.
 
 #### 1. On Server (`node0`):
 ```sh
@@ -300,28 +321,32 @@ sudo tc qdisc del dev ens1f1np1 root
 #### TCP Retransmission (100 concurrent flows):
 * **On Server (`node0`)**:
   ```sh
-  sudo ./micro_kernel -i ens1f1np1 -q 20 &
+  cd ~/eTran/eTran/micro_kernel && sudo ./micro_kernel -i ens1f1np1 -q 20 &
   sleep 2
+  cd ~/eTran/eTran/tcp_app
   LD_PRELOAD=../shared_lib/libetran.so ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=1 ETRAN_NR_NIC_QUEUES=1 ./epoll_server -b 1024 -s
   ```
 * **On Client (`node1`)**:
   ```sh
-  sudo ./micro_kernel -i ens1f1np1 -q 20 &
+  cd ~/eTran/eTran/micro_kernel && sudo ./micro_kernel -i ens1f1np1 -q 20 &
   sleep 2
+  cd ~/eTran/eTran/tcp_app
   LD_PRELOAD=../shared_lib/libetran.so ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=1 ETRAN_NR_NIC_QUEUES=1 ./epoll_client -f 100 -b 1024 -s -i <IP_node0>
   ```
 
 #### Homa Retransmission (100 concurrent flows in both mode):
 * **On `node0`**:
   ```sh
-  sudo ./micro_kernel -i ens1f1np1 -q 20 -w 5 &
+  cd ~/eTran/eTran/micro_kernel && sudo ./micro_kernel -i ens1f1np1 -q 20 -w 5 &
   sleep 2
+  cd ~/eTran/eTran/homa_app
   ETRAN_PROTO=homa ./cp_node client --both 5 --id 0 --workload 1000 --ports 100 --queues 20 --server-nodes 2 --first-server 0
   ```
 * **On `node1`**:
   ```sh
-  sudo ./micro_kernel -i ens1f1np1 -q 20 -w 5 &
+  cd ~/eTran/eTran/micro_kernel && sudo ./micro_kernel -i ens1f1np1 -q 20 -w 5 &
   sleep 2
+  cd ~/eTran/eTran/homa_app
   ETRAN_PROTO=homa ./cp_node client --both 5 --id 1 --workload 1000 --ports 100 --queues 20 --server-nodes 2 --first-server 0
   ```
 
