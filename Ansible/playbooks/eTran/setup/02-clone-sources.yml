@@ -1,0 +1,25 @@
+---
+- name: eTran node setup — clone source repositories
+  hosts: all
+  tasks:
+    - name: Create /local owned by the ansible user
+      become: true
+      ansible.builtin.file:
+        path: /local
+        state: directory
+        owner: "{{ ansible_user }}"
+        mode: "0755"
+
+    - name: Clone eTran-linux
+      ansible.builtin.git:
+        repo: https://github.com/eTran-NSDI25/eTran-linux
+        dest: /local/eTran-linux
+      become: true
+      become_user: "{{ ansible_user }}"
+
+    - name: Clone eTran
+      ansible.builtin.git:
+        repo: https://github.com/eTran-NSDI25/eTran
+        dest: /local/eTran
+      become: true
+      become_user: "{{ ansible_user }}"

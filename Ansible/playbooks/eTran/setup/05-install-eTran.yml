@@ -1,0 +1,16 @@
+---
+- name: eTran node setup — install and compile eTran
+  hosts: all
+  tasks:
+    - name: Install bpftool and llvm
+      become: true
+      ansible.builtin.command:
+        cmd: bash install.sh
+        chdir: /local/eTran
+
+    - name: Configure and compile eTran
+      ansible.builtin.shell:
+        cmd: ./configure && make -C eTran
+        chdir: /local/eTran
+      become: true
+      become_user: "{{ ansible_user }}"
