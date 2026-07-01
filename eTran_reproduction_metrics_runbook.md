@@ -164,9 +164,12 @@ ETRAN_PROTO=homa ./cp_node client \
   --ports 8 \
   --server-nodes 1 \
   --server-ports 1 \
+  --one-way \
   --gbps 0
 ```
 Output: `Clients: ... Kops/sec ...`
+
+> **Measured**: 1,045 Kops/sec, P50 225 µs (paper: 2.9 Mops).
 
 ### 6. eTran - Homa | Server RPC rate, 32B | 3.3 Mops | Medium
 
@@ -182,9 +185,12 @@ ETRAN_PROTO=homa ./cp_node client \
   --ports 8 \
   --server-nodes 1 \
   --server-ports 8 \
+  --one-way \
   --gbps 0
 ```
 Output: `Servers: ... Kops/sec ...`
+
+> **Measured**: 658 Kops/sec server-side (paper: 3.3 Mops).
 
 ### 7–12. eTran - Homa | P50/P99 tail latency slowdown, W2–W5 | 10-Node Cluster
 
