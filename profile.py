@@ -8,7 +8,6 @@ manually configure ECN, buffering, or RED/WRED parameters.
 
 import geni.portal as portal
 import geni.rspec.pg as pg
-import geni.rspec.emulab as emulab
 
 # Create a portal context for parameter handling
 pc = portal.Context()
@@ -28,10 +27,10 @@ pc.verifyParameters()
 request = pc.makeRequestRSpec()
 
 # 1. PROVISION THE MELLANOX SWITCH AS A MANAGED NODE
-# On the Utah cluster, 'mellanox' indicates the SN2410 25GbE/100GbE physical switch
-switch = request.Link("sw1")
-switch.kind = "switch"
-switch.component_id = "switch"
+# By treating it as a RawPC with hardware_type "mellanox", CloudLab will give 
+# us a physical SN2410 switch running Cumulus Linux that we can SSH into.
+switch = request.RawPC("sw1")
+switch.hardware_type = "mellanox"
 switch.Site("utah")
 
 # 2. PROVISION AND ROUTE THE BARE-METAL SERVERS
@@ -41,7 +40,7 @@ for i in range(params.nodeCount):
     node.hardware_type = "xl170"
     node.disk_image = "urn:publicid:IDN+emulab.net+image+emulab-ops//UBUNTU22-64-STD"
     
-    # Allocate a 16 GB blockstore mounted at /mydata for kernel building
+    # Allocate a 16 GB blockstore mounted at /mydata
     bs = node.Blockstore("bs-" + str(i), "/mydata")
     bs.size = "16GB"
     bs.placement = "any"
@@ -55,11 +54,14 @@ for i in range(params.nodeCount):
     ip_addr = "10.10.1.{}".format(i + 1)
     iface.addAddress(pg.IPv4Address(ip_addr, "255.255.255.0"))
     
+    # Create the corresponding interface port on the Mellanox switch (e.g., swp1, swp2)
+    sw_iface = switch.addInterface("swp" + str(i + 1))
+    
     # DRAW A LITERAL PHYSICAL WIRE BETWEEN SERVER PORT AND SWITCH PORT
     # L1Link creates point-to-point physical patches at 25 Gbps
-    link = request.L1Link("l1link-" + name)
+    link = request.L1Link("l1link-" + str(i))
     link.addInterface(iface)
-    link.addInterface(switch.addInterface())
+    link.addInterface(sw_iface)
 
 # Print generated RSpec back to the CloudLab manager
 pc.printRequestRSpec()
