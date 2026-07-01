@@ -10,8 +10,11 @@ against source code in `https://github.com/eTran-NSDI25/eTran`.
 1. **Microkernel** must be running on every node:
    ```bash
    cd /local/eTran/eTran/micro_kernel
-   sudo ./micro_kernel
+   sudo ./micro_kernel -i ens1f1np1 -q 10
    ```
+   > **`-q 10` is required**: NIC has 10 combined queues (check with `ethtool -l ens1f1np1`).
+   > Default 20 crashes with `Number of queues is greater than NIC queues (20 > 10)`,
+   > exacerbated by SMT=off halving the reported core count.
 
 2. **App binaries** live in their build subdirectories:
    ```
@@ -37,6 +40,10 @@ against source code in `https://github.com/eTran-NSDI25/eTran`.
 ### 1. eTran - Homa | Median RTT latency, 32B requests, single client | 11.8 µs | 2-Node
 
 ```bash
+# Microkernel (both nodes) — MUST use -q 10
+# (NIC has 10 combined queues; default=20 crashes with SMT off)
+sudo ./micro_kernel -i ens1f1np1 -q 10
+
 # Server (node0):
 ETRAN_PROTO=homa ./cp_node server
 
@@ -55,6 +62,8 @@ Output every 1s: `RTT (us) P50 ... P99 ... P99.9 ...`
 ```bash
 ETRAN_PROTO=homa ./cp_node client --workload 32 --unloaded 100
 ```
+Initial run (`-q 10`, single client, 32B, one-way): 73 Kops/sec, P50 12.6 µs, P99 27.7 µs, P99.9 39 µs.
+"Lag due to overload: 100.0%" is expected at startup and settles once rate stabilizes.
 
 ### 2. eTran - Homa | Throughput, 1MB requests, back-to-back | 17.7 Gbps | 2-Node
 
@@ -423,7 +432,7 @@ sudo taskset -c 3 ./xdpsock -i ens1f1np1 -q 3 -r -N -z
 | `eTran/tcp_app/lat_client.cc`          | L170-230: 500K ping-pongs, sorted P50/P99/P99.9 output                    |
 | `eTran/tcp_app/flexkvs_bench.cc`       | L630-680 `parse_settings()`, L780-820 stats output with P50-99.99          |
 | `eTran/tcp_app/flexkvs/workload.c`     | L105-118 `distribute_zipf(s)`                                             |
-| `eTran/micro_kernel/micro_kernel.cc`    | L70-90 `parse_args`, `-i` iface, `-q` queues, `-b` busy-poll              |
+| `eTran/micro_kernel/micro_kernel.cc`    | L51 `opt_num_queues=20` default, L106-121 `-q` flag, L70-90 `parse_args`, `-i` iface, `-b` busy-poll |
 | `eTran/lib/eTran_common.cc`            | L594-649 `pre_main` — reads `ETRAN_PROTO`, `ETRAN_NR_APP_THREADS`, `ETRAN_NR_NIC_QUEUES` |
 | `bench-afxdp/xdpsock.c`                | L120-250 `parse_args`, `-r`/`-t`/`-l` modes, `-s` pkt size, `-b` batch    |
 
