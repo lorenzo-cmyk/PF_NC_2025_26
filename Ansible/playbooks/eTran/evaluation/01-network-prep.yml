@@ -65,7 +65,37 @@
           - "=== {{ inventory_hostname }} ARP table ==="
           - "{{ arp_verify.stdout_lines }}"
 
-- name: eTran evaluation — ping all other nodes
+- name: eTran evaluation — install /etc/hosts entries
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Build /etc/hosts block for all nodes
+      ansible.builtin.blockinfile:
+        path: /etc/hosts
+        marker: "# {mark} ANSIBLE MANAGED — eTran cluster"
+        block: |
+          {% for host in groups['all'] %}
+          {{ hostvars[host].node_ip }} {{ host }}
+          {% endfor %}
+        state: present
+        create: false
+
+    - name: Verify hostname resolution
+      ansible.builtin.shell: |
+        {% for host in groups['all'] %}
+        getent hosts {{ host }} 2>/dev/null | head -1 || echo "{{ host }}: MISSING"
+        {% endfor %}
+      register: hosts_verify
+      changed_when: false
+
+    - name: /etc/hosts dump
+      ansible.builtin.debug:
+        msg:
+          - "=== {{ inventory_hostname }} /etc/hosts ==="
+          - "{{ hosts_verify.stdout_lines }}"
+
+- name: eTran evaluation — ping all other nodes by hostname
   hosts: all
   become: false
   gather_facts: false
@@ -74,7 +104,7 @@
       ansible.builtin.shell: |
         {% for host in groups['all'] %}
         {% if host != inventory_hostname %}
-        ping -c 1 -W 2 {{ hostvars[host].node_ip }} > /dev/null 2>&1 && echo "{{ host }} ({{ hostvars[host].node_ip }}): OK" || echo "{{ host }} ({{ hostvars[host].node_ip }}): FAIL"
+        ping -c 1 -W 2 {{ host }} > /dev/null 2>&1 && echo "{{ host }}: OK" || echo "{{ host }}: FAIL"
         {% endif %}
         {% endfor %}
       register: ping_results
