@@ -34,10 +34,25 @@ against source code in `https://github.com/eTran-NSDI25/eTran`.
 4. **Interface name** is hardcoded as `ens1f1np1` (`IF_NAME` macro in cp_node.cc:54,
    micro_kernel.cc, xdpsock.c). Recompile if your NIC differs.
 
-5. **TCP apps require `LD_PRELOAD`**:
+6. **Headless execution** — run benchmarks non-interactively via ssh:
+
    ```bash
-   LD_PRELOAD=../shared_lib/libetran.so   # relative to tcp_app/
+   # Kill, restart, run pattern (each metric requires fresh micro_kernels):
+   ssh node0 'sudo pkill -9 micro_kernel; sudo pkill -9 cp_node'
+   ssh node1 'sudo pkill -9 micro_kernel'
+
+   ssh node0 'sudo nohup bash -c "cd /local/eTran/eTran/micro_kernel && ./micro_kernel -i ens1f1np1 -q 10" </dev/null >/tmp/micro.log 2>&1 &'
+   ssh node1 'sudo nohup bash -c "cd /local/eTran/eTran/micro_kernel && ./micro_kernel -i ens1f1np1 -q 10" </dev/null >/tmp/micro.log 2>&1 &'
+   sleep 6
+
+   ssh node0 'nohup bash -c "cd /local/eTran/eTran/homa_app && ETRAN_PROTO=homa ./cp_node server ..." </dev/null >/tmp/server.log 2>&1 &'
+   sleep 2
+
+   ssh node1 "cd /local/eTran/eTran/homa_app && timeout 10 env ETRAN_PROTO=homa ./cp_node client ... 2>&1"
    ```
+   > Use `timeout N env VAR=val` (not `timeout VAR=val`) — `timeout` doesn't parse
+   > environment prefixes, use explicit `env`. `</dev/null` prevents stdin noise
+   > (the micro_kernel monitor thread complains with "Unknown command" otherwise).
 
 ---
 
@@ -64,12 +79,8 @@ ETRAN_PROTO=homa ./cp_node client \
   --one-way
 ```
 Output every 1s: `RTT (us) P50 ... P99 ... P99.9 ...`
-*Alternative baseline (unloaded, best-case RTT per size):*
-```bash
-ETRAN_PROTO=homa ./cp_node client --workload 32 --unloaded 100
-```
-Initial run (`-q 10`, single client, 32B, one-way): 73 Kops/sec, P50 12.6 µs, P99 27.7 µs, P99.9 39 µs.
-"Lag due to overload: 100.0%" is expected at startup and settles once rate stabilizes.
+
+> **Measured**: 75 Kops/sec, P50 12.2 µs, P99 27.5 µs, P99.9 39 µs (paper: 11.8 µs).
 
 ### 2. eTran - Homa | Throughput, 1MB requests, back-to-back | 17.7 Gbps | 2-Node
 
@@ -89,15 +100,17 @@ ETRAN_PROTO=homa ./cp_node client \
   --gbps 0
 ```
 Output: `Clients: ... Gbps out ...` (line 1528 of cp_node.cc)
-Measured: 17.08 Gbps @ 2.13 Kops/sec, P50 442 µs, P99 1242 µs, P99.9 1638 µs.
 
+> **Measured**: 17.06 Gbps @ 2.13 Kops/sec, P50 435 µs, P99 617 µs, P99.9 740 µs
+> (paper: 17.7 Gbps).
+>
 > **Notes**: `--one-way` is required — without it, the server echoes the 1MB
-> response which doubles the grant-path load and triggers the same off-by-one
-> boundary as the request side. `--client-max 1 --ports 1` is the correct
-> "back-to-back" single-stream configuration; the paper's 17.7 Gbps is
+> response which doubles the grant-path load. `--client-max 1 --ports 1` is the
+> correct "back-to-back" single-stream configuration; the paper's 17.7 Gbps is
 > single-stream throughput, not concurrent saturation.
-> If `--workload 1000000` stalls, use `999999` (avoids `HOMA_MAX_MESSAGE_LENGTH`
-> off-by-one in the grant scheduler).
+> If `--workload 1000000` stalls at startup (few initial seconds of
+> `Homa timer: Abort RPC` before stabilizing), use `999999` to avoid
+> `HOMA_MAX_MESSAGE_LENGTH` off-by-one in the grant scheduler.
 
 ### 3. eTran - Homa | Multi-threaded server throughput, 500KB, 7 clients | 23.0 Gbps | Medium
 
