@@ -1,4 +1,4 @@
-"""eTran L1 Switch Profile
+"""eTran Managed Switch Profile
 
 This profile allocates a variable number of xl170 bare-metal nodes and a 
 dedicated, physically managed Mellanox SN2410 switch on the Utah cluster.
@@ -27,8 +27,8 @@ pc.verifyParameters()
 request = pc.makeRequestRSpec()
 
 # 1. PROVISION THE MELLANOX SWITCH AS A MANAGED NODE
-# By treating it as a RawPC with hardware_type "mellanox", CloudLab will give 
-# us a physical SN2410 switch running Cumulus Linux that we can SSH into.
+# Treating it as a RawPC with hardware_type "mellanox" gives us a physical
+# SN2410 switch running Cumulus Linux that appears in the List View for SSH access.
 switch = request.RawPC("sw1")
 switch.hardware_type = "mellanox"
 switch.Site("utah")
@@ -47,19 +47,21 @@ for i in range(params.nodeCount):
     
     node.Site("utah")
     
-    # Create the raw experimental interface on the server
+    # Create the experimental interface on the server
     iface = node.addInterface("eth1")
     
     # Explicitly add the 10.10.1.x IP addressing matching the eTran test suites
     ip_addr = "10.10.1.{}".format(i + 1)
     iface.addAddress(pg.IPv4Address(ip_addr, "255.255.255.0"))
     
-    # Create the corresponding interface port on the Mellanox switch (e.g., swp1, swp2)
+    # Create the interface port on the Mellanox switch (swp1, swp2, swp3...)
     sw_iface = switch.addInterface("swp" + str(i + 1))
     
-    # DRAW A LITERAL PHYSICAL WIRE BETWEEN SERVER PORT AND SWITCH PORT
-    # L1Link creates point-to-point physical patches at 25 Gbps
-    link = request.L1Link("l1link-" + str(i))
+    # 3. LINK THE SERVER TO THE SWITCH
+    # We create a point-to-point link object for each connection.
+    # Setting the protocol to "Direct" forces a raw, un-virtualized physical link.
+    link = request.Link("l1link-" + str(i))
+    link.protocol = "Direct"
     link.addInterface(iface)
     link.addInterface(sw_iface)
 
