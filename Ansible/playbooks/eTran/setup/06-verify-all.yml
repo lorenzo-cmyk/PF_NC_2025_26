@@ -1,0 +1,72 @@
+---
+- name: eTran node setup — verify all
+  hosts: all
+  gather_facts: false
+  vars:
+    required_deps:
+      - git
+      - fakeroot
+      - build-essential
+      - clang
+      - llvm
+      - bison
+      - flex
+      - bc
+      - dwarves
+      - libpcap-dev
+      - automake
+      - libtool
+      - pkg-config
+  tasks:
+    - name: Check build dependencies
+      ansible.builtin.shell: |
+        missing=""
+        for pkg in {{ required_deps | join(' ') }}; do
+          dpkg -l "$pkg" 2>/dev/null | grep -q '^ii' || missing="$missing $pkg"
+        done
+        [ -z "$missing" ] && echo "OK" || echo "MISSING:$missing"
+      register: deps
+      changed_when: false
+
+    - name: Check cloned repos
+      ansible.builtin.shell: |
+        echo "local=$(test -d /local && echo OK || echo MISSING)"
+        echo "etran-linux=$(test -d /local/eTran-linux/.git && echo OK || echo MISSING)"
+        echo "etran=$(test -d /local/eTran/.git && echo OK || echo MISSING)"
+      register: repos
+      changed_when: false
+
+    - name: Check kernel build artifacts
+      ansible.builtin.shell: |
+        echo "config=$(test -f /local/eTran-linux/.config && echo OK || echo MISSING)"
+        echo "vmlinux=$(test -f /local/eTran-linux/vmlinux && echo OK || echo MISSING)"
+        echo "boot=$(test -f /boot/vmlinuz-6.6.0-eTran+ && echo OK || echo MISSING)"
+        echo "headers=$(test -d /usr/include/linux && echo OK || echo MISSING)"
+        echo "modules=$(test -d /lib/modules/6.6.0-eTran+ && echo OK || echo MISSING)"
+      register: kernel
+      changed_when: false
+
+    - name: Check running kernel version
+      ansible.builtin.command:
+        cmd: uname -r
+      register: uname_r
+      changed_when: false
+      failed_when: "'6.6' not in uname_r.stdout"
+
+    - name: Check eTran installation
+      ansible.builtin.shell: |
+        echo "bpftool=$(which bpftool 2>/dev/null || echo MISSING)"
+        objs=$(find /local/eTran -name '*.o' -o -name 'libbpf.so' 2>/dev/null | wc -l)
+        echo "eTran_objs=$( [ "$objs" -gt 0 ] && echo "$objs objects" || echo NONE )"
+      register: etran
+      changed_when: false
+
+    - name: Verification results
+      ansible.builtin.debug:
+        msg:
+          - "=== {{ inventory_hostname }} ==="
+          - "deps: {{ deps.stdout }}"
+          - "{{ repos.stdout_lines }}"
+          - "{{ kernel.stdout_lines }}"
+          - "kernel: {{ uname_r.stdout }}"
+          - "{{ etran.stdout_lines }}"

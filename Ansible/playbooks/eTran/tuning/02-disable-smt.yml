@@ -1,0 +1,32 @@
+---
+- name: eTran node tuning — disable hyperthreading via GRUB
+  hosts: all
+  become: true
+  tasks:
+    - name: Add nosmt to GRUB_CMDLINE_LINUX
+      ansible.builtin.lineinfile:
+        path: /etc/default/grub
+        regexp: '^GRUB_CMDLINE_LINUX="((?!nosmt).*)"$'
+        line: 'GRUB_CMDLINE_LINUX="\1 nosmt"'
+        backrefs: true
+      register: grub
+
+    - name: Update GRUB
+      ansible.builtin.command:
+        cmd: update-grub
+      when: grub.changed
+
+    - name: Reboot if GRUB was modified
+      ansible.builtin.reboot:
+        reboot_timeout: 600
+      when: grub.changed
+
+    - name: Verify SMT disabled
+      ansible.builtin.shell:
+        cmd: cat /sys/devices/system/cpu/smt/control
+      register: smt_status
+      changed_when: false
+
+    - name: SMT status
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: SMT={{ smt_status.stdout }}"
