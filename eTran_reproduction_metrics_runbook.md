@@ -83,6 +83,32 @@ ETRAN_PROTO=homa ./cp_node client \
 ```
 Output: `Clients: ... Gbps out ...` (line 1528 of cp_node.cc)
 
+> **⚠️ Large-message throughput tuning**: The defaults (`--client-max 64 --ports 4`)
+> create 256 concurrent 1MB Homa RPCs (256MB in-flight) on a single server port.
+> Each 1MB RPC fragments into ~17 grant rounds of 60KB, producing ~4,352 grant
+> cycles competing for server attention. On 10-queue NICs with SMT=off, the server
+> enters a resend storm: `Issue resend` + `Abort RPC` flood, with server output
+> Gbps exceeding input Gbps (all grants/acks, no payload completions).
+> `avg. req. length` collapses to 32B (only control RPCs complete).
+>
+> **Start conservatively and ramp up** — run each for 10-15s and check `Gbps out` stabilizes above 0:
+>
+> ```bash
+> # Warmup — verify large messages complete at all:
+> ETRAN_PROTO=homa ./cp_node client --first-server 0 --workload 1048576 \
+>   --client-max 1 --ports 1 --server-nodes 1 --server-ports 1 --gbps 0
+>
+> # Ramp:
+> # --client-max 4 --ports 1    (4 concurrent, 4MB in-flight)
+> # --client-max 8 --ports 1    (8 concurrent, 8MB in-flight)
+> # --client-max 4 --ports 4    (16 concurrent, 16MB in-flight)
+> # --client-max 8 --ports 4    (32 concurrent, 32MB in-flight)
+> # --client-max 16 --ports 4   (64 concurrent, 64MB in-flight)
+> ```
+>
+> Record the highest stable throughput. Paper's 17.7 Gbps may require higher
+> NIC queue counts or more cores than the current 10-queue SMT=off setup.
+
 ### 3. eTran - Homa | Multi-threaded server throughput, 500KB, 7 clients | 23.0 Gbps | Medium
 
 ```bash
