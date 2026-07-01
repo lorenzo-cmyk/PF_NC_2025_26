@@ -1,0 +1,88 @@
+---
+- name: eTran evaluation — enable IP forwarding (persistent)
+  hosts: all
+  become: true
+  tasks:
+    - name: Enable net.ipv4.ip_forward
+      ansible.builtin.sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        sysctl_set: true
+        state: present
+        reload: true
+
+- name: eTran evaluation — gather interface facts
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Get ens1f1np1 IPv4 address
+      ansible.builtin.shell:
+        cmd: ip -4 addr show ens1f1np1 | grep -oP 'inet \K[\d.]+'
+      register: iface_ip
+      changed_when: false
+
+    - name: Get ens1f1np1 MAC address
+      ansible.builtin.shell:
+        cmd: cat /sys/class/net/ens1f1np1/address
+      register: iface_mac
+      changed_when: false
+
+    - name: Store interface facts
+      ansible.builtin.set_fact:
+        node_ip: "{{ iface_ip.stdout | trim }}"
+        node_mac: "{{ iface_mac.stdout | trim }}"
+        cacheable: false
+
+    - name: Show gathered facts
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: IP={{ node_ip }} MAC={{ node_mac }}"
+
+- name: eTran evaluation — install permanent ARP entries
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Add ARP entries for all other nodes
+      ansible.builtin.shell: |
+        {% for host in groups['all'] %}
+        {% if host != inventory_hostname %}
+        ip neigh replace {{ hostvars[host].node_ip }} lladdr {{ hostvars[host].node_mac }} dev ens1f1np1 nud permanent
+        {% endif %}
+        {% endfor %}
+      register: arp_added
+      changed_when: false
+
+    - name: Verify ARP table
+      ansible.builtin.shell:
+        cmd: ip neigh show dev ens1f1np1 nud permanent
+      register: arp_verify
+      changed_when: false
+
+    - name: ARP table dump
+      ansible.builtin.debug:
+        msg:
+          - "=== {{ inventory_hostname }} ARP table ==="
+          - "{{ arp_verify.stdout_lines }}"
+
+- name: eTran evaluation — ping all other nodes
+  hosts: all
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Ping every other node
+      ansible.builtin.shell: |
+        {% for host in groups['all'] %}
+        {% if host != inventory_hostname %}
+        ping -c 1 -W 2 {{ hostvars[host].node_ip }} > /dev/null 2>&1 && echo "{{ host }} ({{ hostvars[host].node_ip }}): OK" || echo "{{ host }} ({{ hostvars[host].node_ip }}): FAIL"
+        {% endif %}
+        {% endfor %}
+      register: ping_results
+      changed_when: false
+      failed_when: false
+
+    - name: Ping results
+      ansible.builtin.debug:
+        msg:
+          - "=== {{ inventory_hostname }} ping ==="
+          - "{{ ping_results.stdout_lines }}"
