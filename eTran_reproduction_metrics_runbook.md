@@ -75,7 +75,7 @@ ETRAN_PROTO=homa ./cp_node client \
 ```
 Output every 1s: `RTT (us) P50 ... P99 ... P99.9 ...`
 
-> **Measured**: 75 Kops/sec, P50 12.2 µs, P99 27.5 µs, P99.9 39 µs (paper: 11.8 µs).
+> **Measured**: 84 Kops/sec, P50 10.6 µs, P99 25.9 µs, P99.9 33 µs (paper: 11.8 µs).
 
 ### 2. eTran - Homa | Throughput, 1MB requests, back-to-back | 17.7 Gbps | 2-Node
 
