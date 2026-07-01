@@ -99,22 +99,3 @@ Evaluated across two cores: one core generates ACK/credit packets using `XDP_GEN
 | **l2fwd** (Baseline) | **6.73** | | 1.74 | | **3.87** | |
 | **rx-drop + XDP_GEN** | **6.03** | | 1.35 | | **4.47** | |
 
----
-
-## 4. Original Evaluation Setup (Hardware & Configuration)
-
-To ensure accurate reproduction, match your evaluation environment with the paper's original hardware and configuration settings as closely as possible:
-
-* **Physical Servers**: 10 `xl170` physical machines from CloudLab.
-* **CPU**: Two 10-core Intel Xeon E5-2640v4 CPUs (2.4GHz).
-* **Memory**: 64 GB RAM.
-* **Network Interfaces (NICs)**: Mellanox ConnectX-4 25 Gbps NIC.
-* **Network Switch**: Mellanox 2410 switch under the same rack.
-* **Operating System / Kernel**: 
-  * Linux kernel **v6.6.0** for eTran (Homa/TCP) and native Linux (Homa/TCP).
-  * Linux kernel **v5.15.0** for TAS (due to Mellanox driver issues on v6.6.0).
-* **MTU (Maximum Transmission Unit)**: 1500 bytes (default maximum packet size).
-* **NIC Interrupt Coalescing**: **Disabled** for all experiments (following standard high-performance low-latency baseline setups).
-* **ECN Marking Threshold (DCTCP)**: Set to **70KB**.
-* **CPU Core Isolation**: By default for eTran and TAS, separate CPU cores are used for applications and interrupt processing / busy polling. A dedicated core is provisioned for the control path / slow path. Native Linux (Homa/TCP) uses all provisioned cores.
-
