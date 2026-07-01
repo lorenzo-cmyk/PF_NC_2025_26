@@ -107,36 +107,42 @@ Output: `Clients: ... Gbps out ...` (line 1528 of cp_node.cc)
 > `Homa timer: Abort RPC` before stabilizing), use `999999` to avoid
 > `HOMA_MAX_MESSAGE_LENGTH` off-by-one in the grant scheduler.
 
-### 3. eTran - Homa | Multi-threaded server throughput, 500KB, 7 clients | 23.0 Gbps | Medium
+### 3. eTran - Homa | Multi-threaded server throughput, 500KB, 7 clients | 23.0 Gbps | 8-Node
 
 ```bash
-# Server (node0): uses 7 port receivers
-ETRAN_PROTO=homa ./cp_node server --ports 7
+# Server (node0):
+ETRAN_PROTO=homa ./cp_node server
 
-# 7 client nodes each running:
+# 7 client nodes (node1–node7), each:
 ETRAN_PROTO=homa ./cp_node client \
   --first-server 0 \
   --workload 524288 \
-  --client-max 100 \
-  --ports 7 \
+  --client-max 64 \
+  --ports 1 \
   --server-nodes 1 \
-  --server-ports 7 \
+  --server-ports 1 \
   --one-way \
   --gbps 0
 ```
 Measure server-side Gbps in (output line: `Servers: ... Gbps in ...`).
 
-### 4. eTran - Homa | Multi-threaded client throughput, 500KB, 7 servers | 22.7 Gbps | Medium
+> **Best measured**: 13.06 Gbps peak (server `--ports 1`, clients `--ports 1`,
+> `--client-max 64`). Paper: 23.0 Gbps.
+> Server `--ports > 4` triggers buffer pool assertion (`nr_slabs_avail > nr_slabs`),
+> limiting server to single-port for large messages. Multi-client grant scaling
+> degrades above 200 concurrent RPCs.
+
+### 4. eTran - Homa | Multi-threaded client throughput, 500KB, 7 servers | 22.7 Gbps | 8-Node
 
 ```bash
-# 7 server nodes, each:
-ETRAN_PROTO=homa ./cp_node server --ports 1
+# 7 server nodes (node0–node6), each:
+ETRAN_PROTO=homa ./cp_node server
 
-# 1 client with 7 ports:
+# 1 client (node7) with 7 ports matching 7 servers:
 ETRAN_PROTO=homa ./cp_node client \
   --first-server 0 \
   --workload 524288 \
-  --client-max 100 \
+  --client-max 64 \
   --ports 7 \
   --server-nodes 7 \
   --server-ports 1 \
@@ -144,6 +150,9 @@ ETRAN_PROTO=homa ./cp_node client \
   --gbps 0
 ```
 Measure client-side Gbps out.
+
+> **Best measured**: 18.07 Gbps sustained (client `--ports 7`, servers `--ports 1`,
+> `--client-max 64`). Paper: 22.7 Gbps. 80% of paper.
 
 ### 5. eTran - Homa | Client RPC rate, 32B | 2.9 Mops | 8-Node (7:1 ratio)
 
@@ -554,3 +563,13 @@ sudo taskset -c 3 ./xdpsock -i ens1f1np1 -q 3 -r -N -z
    (`common/tran_def/homa.h:8`). If `--workload 1000000` stalls at startup (few
    initial seconds of `Homa timer: Abort RPC` before stabilizing), use `--workload
    999999` to avoid the exact boundary.
+
+10. **TCP benchmarks blocked** — `epoll_client` and `epoll_server` crash with
+    SIGABRT (exit 134). Likely a TCP eBPF path assertion similar to the Homa
+    XDP_EGRESS bug. Metrics #13–21 are blocked pending TCP eBPF debugging.
+
+11. **Multi-client Homa grant scaling** — Beyond ~200 concurrent RPCs, the Homa
+    BPF grant mechanism collapses under `insert_grant_list → bpf_obj_new` memory
+    pressure. This blocks metrics #3, #5–12 at full paper concurrency levels.
+    Per-metric restart (kill micro_kernels + clean `/dev/shm/*` + restart)
+    is mandatory between runs to avoid stale BPF state.
