@@ -22,7 +22,8 @@ request = pc.makeRequestRSpec()
 
 # 1. PROVISION THE MELLANOX SWITCH AS A MANAGED NODE
 switch = request.RawPC("sw1")
-switch.hardware_type = "mellanox"
+# FIXED: The exact CloudLab database string for the Mellanox switch on Utah
+switch.hardware_type = "mlnx-sn2410" 
 switch.Site("utah")
 
 # 2. PROVISION AND ROUTE THE BARE-METAL SERVERS
@@ -38,13 +39,8 @@ for i in range(params.nodeCount):
     
     node.Site("utah")
     
-    # Create the experimental interface on the server
     iface = node.addInterface("eth1")
     
-    # REMOVED IP ASSIGNMENT TO PASS CLOUDLAB LAYER-1 VALIDATION
-    # IPs will be assigned manually via the OS after boot
-    
-    # Create the interface port on the Mellanox switch (swp1, swp2...)
     sw_iface = switch.addInterface("swp" + str(i + 1))
     
     # 3. LINK THE SERVER TO THE SWITCH
