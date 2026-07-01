@@ -15,6 +15,12 @@ against source code in `https://github.com/eTran-NSDI25/eTran`.
    > **`-q 10` is required**: NIC has 10 combined queues (check with `ethtool -l ens1f1np1`).
    > Default 20 crashes with `Number of queues is greater than NIC queues (20 > 10)`,
    > exacerbated by SMT=off halving the reported core count.
+   >
+   > **⚠️ BPF patch required** for large Homa messages: the XDP_EGRESS program drops
+   > non-DATA egress packets (grants, resends) at `micro_kernel/eBPF/homa/main.c:240`.
+   > Apply the patch at `main.c` line 235-248 to move the `c->type != DATA` check
+   > before the `data_header` bounds check, then `make -j$(nproc)` to rebuild.
+   > See Known Limitations #7 for the exact diff.
 
 2. **App binaries** live in their build subdirectories:
    ```
@@ -71,49 +77,32 @@ Initial run (`-q 10`, single client, 32B, one-way): 73 Kops/sec, P50 12.6 µs, P
 # Server (node0):
 ETRAN_PROTO=homa ./cp_node server
 
-# Client (node1) — gbps=0 means send as fast as possible:
+# Client (node1) — single-stream back-to-back:
 ETRAN_PROTO=homa ./cp_node client \
   --first-server 0 \
-  --workload 1048576 \
-  --client-max 64 \
-  --ports 4 \
+  --workload 1000000 \
+  --client-max 1 \
+  --ports 1 \
   --server-nodes 1 \
   --server-ports 1 \
+  --one-way \
   --gbps 0
 ```
 Output: `Clients: ... Gbps out ...` (line 1528 of cp_node.cc)
+Measured: 17.08 Gbps @ 2.13 Kops/sec, P50 442 µs, P99 1242 µs, P99.9 1638 µs.
 
-> **⚠️ Large-message throughput tuning**: The defaults (`--client-max 64 --ports 4`)
-> create 256 concurrent 1MB Homa RPCs (256MB in-flight) on a single server port.
-> Each 1MB RPC fragments into ~17 grant rounds of 60KB, producing ~4,352 grant
-> cycles competing for server attention. On 10-queue NICs with SMT=off, the server
-> enters a resend storm: `Issue resend` + `Abort RPC` flood, with server output
-> Gbps exceeding input Gbps (all grants/acks, no payload completions).
-> `avg. req. length` collapses to 32B (only control RPCs complete).
->
-> **Start conservatively and ramp up** — run each for 10-15s and check `Gbps out` stabilizes above 0:
->
-> ```bash
-> # Warmup — verify large messages complete at all:
-> ETRAN_PROTO=homa ./cp_node client --first-server 0 --workload 1048576 \
->   --client-max 1 --ports 1 --server-nodes 1 --server-ports 1 --gbps 0
->
-> # Ramp:
-> # --client-max 4 --ports 1    (4 concurrent, 4MB in-flight)
-> # --client-max 8 --ports 1    (8 concurrent, 8MB in-flight)
-> # --client-max 4 --ports 4    (16 concurrent, 16MB in-flight)
-> # --client-max 8 --ports 4    (32 concurrent, 32MB in-flight)
-> # --client-max 16 --ports 4   (64 concurrent, 64MB in-flight)
-> ```
->
-> Record the highest stable throughput. Paper's 17.7 Gbps may require higher
-> NIC queue counts or more cores than the current 10-queue SMT=off setup.
+> **Notes**: `--one-way` is required — without it, the server echoes the 1MB
+> response which doubles the grant-path load and triggers the same off-by-one
+> boundary as the request side. `--client-max 1 --ports 1` is the correct
+> "back-to-back" single-stream configuration; the paper's 17.7 Gbps is
+> single-stream throughput, not concurrent saturation.
+> If `--workload 1000000` stalls, use `999999` (avoids `HOMA_MAX_MESSAGE_LENGTH`
+> off-by-one in the grant scheduler).
 
 ### 3. eTran - Homa | Multi-threaded server throughput, 500KB, 7 clients | 23.0 Gbps | Medium
 
 ```bash
 # Server (node0): uses 7 port receivers
-#   (port_receivers default = 1, passed to server implicitly via --ports)
 ETRAN_PROTO=homa ./cp_node server --ports 7
 
 # 7 client nodes each running:
@@ -124,6 +113,7 @@ ETRAN_PROTO=homa ./cp_node client \
   --ports 7 \
   --server-nodes 1 \
   --server-ports 7 \
+  --one-way \
   --gbps 0
 ```
 Measure server-side Gbps in (output line: `Servers: ... Gbps in ...`).
@@ -142,6 +132,7 @@ ETRAN_PROTO=homa ./cp_node client \
   --ports 7 \
   --server-nodes 7 \
   --server-ports 1 \
+  --one-way \
   --gbps 0
 ```
 Measure client-side Gbps out.
@@ -203,8 +194,13 @@ ETRAN_PROTO=homa ./cp_node client \
   --ports 4 \
   --server-nodes 1 \
   --server-ports 8 \
+  --one-way \
   --gbps 20
 ```
+Record P50/P99/P99.9 RTT (µs) from 1s stats output (`client_stats`, line 1528).
+Slowdown = `eTran_RTT / Linux_RTT`.
+For W4/W5: also filter to shortest 10% of RPCs (use `dump_times` command
+before stopping the client, then post-process).
 Record P50/P99/P99.9 RTT (µs) from 1s stats output (`client_stats`, line 1528).
 Slowdown = `eTran_RTT / Linux_RTT`.
 For W4/W5: also filter to shortest 10% of RPCs (use `dump_times` command
@@ -367,11 +363,12 @@ perf report --stdio --sort=comm,dso,symbol,dso_from,symbol_from
 perf stat -e cycles,instructions \
   ETRAN_PROTO=homa ./cp_node client \
   --first-server 0 \
-  --workload 1048576 \
-  --client-max 64 \
+  --workload 1000000 \
+  --client-max 1 \
   --ports 1 \
   --server-nodes 1 \
   --server-ports 1 \
+  --one-way \
   --gbps 0
 ```
 
@@ -489,3 +486,48 @@ sudo taskset -c 3 ./xdpsock -i ens1f1np1 -q 3 -r -N -z
 6. **TAS comparison baselines** — TAS (Transport Acceleration Substrate) is
    a separate project not included in the eTran repo. For #14, compare eTran
    TCP against Linux TCP only; TAS comparison requires a separate TAS setup.
+
+7. **Homa large-message grants (metrics #2–4, #7–12, #22)** — The upstream
+   eTran XDP_EGRESS BPF program at `micro_kernel/eBPF/homa/main.c:240` drops
+   grant/resend packets because the `data_header` bounds check runs before the
+   `c->type != DATA` check. All large Homa benchmarks **require** this patch:
+
+   ```diff
+   --- a/micro_kernel/eBPF/homa/main.c
+   +++ b/micro_kernel/eBPF/homa/main.c
+        eth = (struct ethhdr *)data;
+   +    CHECK_AND_DROP_LOG(eth + 1 > data_end, "eth + 1 > data_end");
+        iph = (struct iphdr *)(eth + 1);
+   +    CHECK_AND_DROP_LOG(iph + 1 > data_end, "iph + 1 > data_end");
+        c = (struct common_header *)(iph + 1);
+   -    d = (struct data_header *)c;
+   -
+   -    CHECK_AND_DROP_LOG(d + 1 > data_end, "d + 1 > data_end");
+   +    CHECK_AND_DROP_LOG(c + 1 > data_end, "c + 1 > data_end");
+
+        CHECK_AND_DROP_LOG(iph->protocol != IPPROTO_HOMA, "not HOMA protocol");
+
+        if (unlikely(data_meta->tx.slowpath)) {
+            return xmit_packet(ctx, eth, iph);
+        }
+   -    CHECK_AND_DROP_LOG(c->type != DATA, "not DATA packet");
+   +    if (c->type != DATA) {
+   +        return xmit_packet(ctx, eth, iph);
+   +    }
+   +
+   +    d = (struct data_header *)c;
+   +    CHECK_AND_DROP_LOG(d + 1 > data_end, "d + 1 > data_end");
+   ```
+
+   > **Rebuild after patching**: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
+   > Then restart the micro_kernel on all nodes.
+
+8. **`--one-way` required for large Homa messages** — Without `--one-way`,
+   the server echoes the full message as a response, doubling the grant-path
+   load and hitting the `HOMA_MAX_MESSAGE_LENGTH` boundary in both directions.
+   All large-message benchmarks (metrics #2–4, #7–12, #22) use `--one-way`.
+
+9. **`HOMA_MAX_MESSAGE_LENGTH` off-by-one** — `HOMA_MAX_MESSAGE_LENGTH = 1000000`
+   (`common/tran_def/homa.h:8`). If `--workload 1000000` stalls at startup (few
+   initial seconds of `Homa timer: Abort RPC` before stabilizing), use `--workload
+   999999` to avoid the exact boundary.
