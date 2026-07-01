@@ -61,22 +61,17 @@ against source code in `https://github.com/eTran-NSDI25/eTran`.
 ### 1. eTran - Homa | Median RTT latency, 32B requests, single client | 11.8 µs | 2-Node
 
 ```bash
-# Microkernel (both nodes) — MUST use -q 10
-# (NIC has 10 combined queues; default=20 crashes with SMT off)
-sudo ./micro_kernel -i ens1f1np1 -q 10
-
 # Server (node0):
 ETRAN_PROTO=homa ./cp_node server
 
-# Client (node1):
+# Client (node1) — server echoes 32B response (no --one-way per paper §4.2):
 ETRAN_PROTO=homa ./cp_node client \
   --first-server 0 \
   --workload 32 \
   --client-max 1 \
   --ports 1 \
   --server-nodes 1 \
-  --server-ports 1 \
-  --one-way
+  --server-ports 1
 ```
 Output every 1s: `RTT (us) P50 ... P99 ... P99.9 ...`
 
@@ -150,47 +145,54 @@ ETRAN_PROTO=homa ./cp_node client \
 ```
 Measure client-side Gbps out.
 
-### 5. eTran - Homa | Client RPC rate, 32B | 2.9 Mops | Medium
+### 5. eTran - Homa | Client RPC rate, 32B | 2.9 Mops | 8-Node (7:1 ratio)
+
+> **Paper (§4.2)** uses the same 7:1 client-to-server thread ratio as metric 3:
+> 7 client nodes → 1 server node. This is NOT a 2-node test.
 
 ```bash
 # Server (node0):
-ETRAN_PROTO=homa ./cp_node server
+ETRAN_PROTO=homa ./cp_node server --ports 7
 
-# Client (node1) — maximize Kops/sec via high client-max:
+# 7 client nodes (node1–node7), each:
 ETRAN_PROTO=homa ./cp_node client \
   --first-server 0 \
   --workload 32 \
   --client-max 256 \
-  --ports 8 \
+  --ports 7 \
   --server-nodes 1 \
-  --server-ports 1 \
-  --one-way \
+  --server-ports 7 \
   --gbps 0
 ```
 Output: `Clients: ... Kops/sec ...`
 
-> **Measured**: 1,045 Kops/sec, P50 225 µs (paper: 2.9 Mops).
+> **2-node approximation** (for quick sanity check):
+> `--ports 7 --client-max 256 --server-ports 1` on single client.
+> **Measured (2-node)**: 1,045 Kops/sec (paper: 2.9 Mops across 7 client nodes).
 
-### 6. eTran - Homa | Server RPC rate, 32B | 3.3 Mops | Medium
+### 6. eTran - Homa | Server RPC rate, 32B | 3.3 Mops | 8-Node (1:7 ratio)
+
+> **Paper (§4.2)** uses the same 1:7 ratio as metric 4:
+> 1 client node → 7 server nodes.
 
 ```bash
-# Server (node0):
-ETRAN_PROTO=homa ./cp_node server --ports 8
+# 7 server nodes (node0–node6), each:
+ETRAN_PROTO=homa ./cp_node server --ports 1
 
-# Client (node1):
+# Client (node7):
 ETRAN_PROTO=homa ./cp_node client \
   --first-server 0 \
   --workload 32 \
   --client-max 256 \
-  --ports 8 \
-  --server-nodes 1 \
-  --server-ports 8 \
-  --one-way \
+  --ports 7 \
+  --server-nodes 7 \
+  --server-ports 1 \
   --gbps 0
 ```
-Output: `Servers: ... Kops/sec ...`
+Output: `Servers: ... Kops/sec ...` (aggregate across all 7 servers).
 
-> **Measured**: 658 Kops/sec server-side (paper: 3.3 Mops).
+> **2-node approximation**: `--server-ports 8 --ports 8 --client-max 256` on single server.
+> **Measured (2-node)**: 658 Kops/sec server-side (paper: 3.3 Mops across 7 servers).
 
 ### 7–12. eTran - Homa | P50/P99 tail latency slowdown, W2–W5 | 10-Node Cluster
 
@@ -545,6 +547,8 @@ sudo taskset -c 3 ./xdpsock -i ens1f1np1 -q 3 -r -N -z
    the server echoes the full message as a response, doubling the grant-path
    load and hitting the `HOMA_MAX_MESSAGE_LENGTH` boundary in both directions.
    All large-message benchmarks (metrics #2–4, #7–12, #22) use `--one-way`.
+   32B benchmarks (metrics #1, #5–6, #13–21) do NOT use `--one-way` per the
+   paper: the server echoes a 32-byte response (§4.2).
 
 9. **`HOMA_MAX_MESSAGE_LENGTH` off-by-one** — `HOMA_MAX_MESSAGE_LENGTH = 1000000`
    (`common/tran_def/homa.h:8`). If `--workload 1000000` stalls at startup (few
