@@ -1,0 +1,36 @@
+---
+- name: eTran node tuning — verify all
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Check SMT disabled
+      ansible.builtin.shell:
+        cmd: |
+          echo "smt_control=$(cat /sys/devices/system/cpu/smt/control)"
+          echo "nosmt_grub=$(grep -q 'nosmt' /etc/default/grub && echo OK || echo MISSING)"
+      register: smt
+      changed_when: false
+
+    - name: Check tuned installed and active
+      ansible.builtin.shell:
+        cmd: |
+          echo "tuned_pkg=$(dpkg -l tuned 2>/dev/null | grep -q '^ii' && echo OK || echo MISSING)"
+          echo "tuned_svc=$(systemctl is-active tuned 2>/dev/null || echo MISSING)"
+          echo "tuned_profile=$(tuned-adm active 2>/dev/null || echo MISSING)"
+      register: tuned
+      changed_when: false
+
+    - name: Check sysbench installed
+      ansible.builtin.shell:
+        cmd: |
+          echo "sysbench=$(dpkg -l sysbench 2>/dev/null | grep -q '^ii' && echo OK || echo MISSING)"
+      register: sysbench
+      changed_when: false
+
+    - name: Verification results
+      ansible.builtin.debug:
+        msg:
+          - "=== {{ inventory_hostname }} ==="
+          - "{{ smt.stdout_lines }}"
+          - "{{ tuned.stdout_lines }}"
+          - "{{ sysbench.stdout_lines }}"
