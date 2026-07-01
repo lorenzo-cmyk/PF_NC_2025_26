@@ -20,9 +20,8 @@ pc.verifyParameters()
 
 request = pc.makeRequestRSpec()
 
-# 1. PROVISION THE MELLANOX SWITCH AS A MANAGED NODE
+# 1. PROVISION THE MELLANOX SWITCH
 switch = request.RawPC("sw1")
-# FIXED: The exact CloudLab database string for the Mellanox switch on Utah
 switch.hardware_type = "mlnx-sn2410" 
 switch.Site("utah")
 
@@ -39,13 +38,15 @@ for i in range(params.nodeCount):
     
     node.Site("utah")
     
+    # Create the experimental interface on the server
     iface = node.addInterface("eth1")
     
+    # Create the corresponding interface port on the switch (swp1, swp2...)
     sw_iface = switch.addInterface("swp" + str(i + 1))
     
     # 3. LINK THE SERVER TO THE SWITCH
-    link = request.Link("l1link-" + str(i))
-    link.protocol = "Direct"
+    # A standard Link between two RawPCs automatically provisions a physical path
+    link = request.Link("link-" + str(i))
     link.addInterface(iface)
     link.addInterface(sw_iface)
 
