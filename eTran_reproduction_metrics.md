@@ -50,7 +50,11 @@ Use these target values and formulas to verify and reproduce the evaluations des
 | **Linux - TCP** | Total CPU cycles spent per request (total kcycles, see breakdown below) | kcycles | **12.51** | |
 | **eTran - Homa** | Total CPU cycles spent per request (total kcycles, see breakdown below) | kcycles | **5.48** | |
 | **Linux - Homa** | Total CPU cycles spent per request (total kcycles, see breakdown below) | kcycles | **17.43** | |
-| **eTran (Pacing)** | Traffic shaping rate conformance deviation under pacing engine | % | **< 0.4** | |
+| **eTran (Pacing)** | Traffic shaping rate conformance deviation under pacing engine (1MB @ 8 Gbps) | % | **< 0.4** | |
+| **eTran (Pacing)** | Aggregate throughput for multiple flows with an 8 Gbps target | Mbps | **7950 ~ 8050** | |
+| **eTran - TCP** | Throughput penalty under 1% packet loss | % | **~8** | |
+| **eTran - TCP** | Throughput penalty under 5% packet loss | % | **~33** | |
+| **eTran - Homa** | Throughput penalty under 5% packet loss | % | **~90-100** | |
 
 ---
 
