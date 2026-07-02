@@ -1,5 +1,5 @@
 ---
-- name: eTran node tuning — verify all
+- name: eTran node tuning — verify all + post-tuning benchmark
   hosts: all
   gather_facts: false
   tasks:
@@ -27,10 +27,25 @@
       register: sysbench
       changed_when: false
 
+    - name: Run single-threaded CPU benchmark (post-tuning)
+      ansible.builtin.command:
+        cmd: sysbench cpu run
+      register: sysbench_st_post
+      changed_when: false
+
+    - name: Run multi-threaded CPU benchmark (post-tuning)
+      ansible.builtin.shell:
+        cmd: sysbench --threads=$(nproc) cpu run
+      register: sysbench_mt_post
+      changed_when: false
+
     - name: Verification results
       ansible.builtin.debug:
         msg:
-          - "=== {{ inventory_hostname }} ==="
+          - "=== {{ inventory_hostname }} VERIFICATION ==="
           - "{{ smt.stdout_lines }}"
           - "{{ tuned.stdout_lines }}"
           - "{{ sysbench.stdout_lines }}"
+          - "=== POST-TUNING BENCHMARK ==="
+          - "{{ sysbench_st_post.stdout_lines }}"
+          - "{{ sysbench_mt_post.stdout_lines }}"
