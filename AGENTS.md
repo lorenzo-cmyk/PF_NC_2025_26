@@ -42,10 +42,32 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
 - TCP benchmarks (epoll_*) crash with SIGABRT — unresolved
 - SMT ON degrades AF_XDP performance
 
+## What NOT to do
+- Never use `--queues` on cp_node client — kills throughput (e.g. 1045→86 Kops)
+- Never use `-b` (busy-poll) on micro_kernel — breaks Homa benchmark
+- Never use `tuned-adm off` or zero coalescing — reduces throughput
+- Never double `umem_num_frames` — doesn't help, causes overhead
+- Never skip shm cleanup between metrics — causes silent failures
+
+## Multi-node orchestration
+Start clients sequentially (0.3s stagger) to avoid overwhelming the server:
+```bash
+for i in 1 2 3 4 5 6 7; do
+  ssh node$i "nohup bash -c '...timeout 15 env ETRAN_PROTO=homa ./cp_node client ...' </dev/null >/tmp/client.log 2>&1 &" &
+  sleep 0.3
+done
+```
+
 ## Hardware
 - CloudLab xl170, 10-core E5-2640v4 × 1 socket, Mellanox ConnectX-5 100G
 - Paper used 2 sockets (20 cores) + ConnectX-4 25G on same node type
 - NIC: `ens1f1np1`, Homa port range 4000-5007, TCP port 50000
+- When SMT=off: 10 logical cores, NIC has 10 combined queues → `-q 10`
+- When SMT=on: 20 logical cores, NIC has 20 combined queues → `-q 20` works but hurts perf
+
+## Ansible inventory
+- `@server` = node0, `@clients` = node1–node9
+- Paper PDF: `nsdi25-chen-zhongjie.pdf` in repo root
 
 ## Key source files
 - `common/xskbp/xsk_buffer_pool.h` — buffer pool constants (umem_num_frames, buffers_per_slab)
