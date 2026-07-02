@@ -1,0 +1,27 @@
+---
+- name: eTran evaluation — set MTU
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    mtu: 9000
+    iface: ens1f1np1
+  tasks:
+    - name: Detect VLAN interface with 10.0.1.x address
+      ansible.builtin.shell: |
+        ifconfig | awk '/^[a-z0-9]+:/ {iface=$1; sub(/:$/, "", iface)} /inet 10\.0\.1\./ {print iface; found=1; exit} END {if (!found) print ""}'
+      register: vlan_iface
+      changed_when: false
+
+    - name: Set MTU on primary interface
+      ansible.builtin.command:
+        cmd: ip link set {{ iface }} mtu {{ mtu }}
+      changed_when: false
+      failed_when: false
+
+    - name: Set MTU on VLAN interface
+      ansible.builtin.command:
+        cmd: ip link set {{ vlan_iface.stdout }} mtu {{ mtu }}
+      when: vlan_iface.stdout | length > 0
+      changed_when: false
+      failed_when: false

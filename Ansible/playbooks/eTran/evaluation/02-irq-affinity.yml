@@ -1,0 +1,77 @@
+---
+- name: eTran evaluation — set NIC queue count and pin IRQs
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    lb_config: xl170_default
+    iface: ens1f1np1
+  tasks:
+    - name: Count online CPUs
+      ansible.builtin.shell:
+        cmd: grep -c ^processor /proc/cpuinfo
+      register: cpu_count
+      changed_when: false
+
+    - name: Generate core list for {{ lb_config }}
+      ansible.builtin.shell: |
+        num_cores={{ cpu_count.stdout }}
+        case {{ lb_config }} in
+          xl170_default|gen2)
+            seq 0 $((num_cores - 1))
+            ;;
+          gen3)
+            i=0; while [ $i -lt $((num_cores / 4)) ]; do
+              echo $((2 * i))
+              i=$((i + 1))
+            done
+            ;;
+          gen3_alt)
+            i=0; while [ $i -lt $((num_cores / 2)) ]; do
+              echo "$i"
+              i=$((i + 1))
+            done
+            ;;
+        esac
+      register: core_list
+      changed_when: false
+
+    - name: Set NIC queue count
+      ansible.builtin.command:
+        cmd: ethtool -L {{ iface }} combined {{ core_list.stdout_lines | length }}
+      changed_when: false
+      failed_when: false
+
+    - name: Get NIC PCI slot
+      ansible.builtin.shell:
+        cmd: cat /sys/class/net/{{ iface }}/device/uevent | sed -n 's/PCI_SLOT_NAME=//p'
+      register: pci_slot
+      changed_when: false
+
+    - name: Get NIC IRQ list (after queue count change)
+      ansible.builtin.shell: |
+        pci={{ pci_slot.stdout }}
+        grep "mlx5_comp" /proc/interrupts | grep "@pci:$pci" | sed 's/^ *//' | cut -d: -f1 | sort -n
+      register: irq_list
+      changed_when: false
+
+    - name: Pin each IRQ to its core
+      ansible.builtin.shell: |
+        echo {{ item.0 }} > /proc/irq/{{ item.1 }}/smp_affinity_list
+      loop: "{{ core_list.stdout_lines | zip(irq_list.stdout_lines) | list }}"
+      changed_when: false
+
+    - name: Show IRQ affinity
+      ansible.builtin.shell: |
+        for irq in {{ irq_list.stdout_lines | join(' ') }}; do
+          core=$(cat /proc/irq/$irq/smp_affinity_list 2>/dev/null)
+          echo "IRQ $irq -> core $core"
+        done
+      register: affinity_result
+      changed_when: false
+
+    - name: IRQ affinity map
+      ansible.builtin.debug:
+        msg:
+          - "{{ inventory_hostname }}"
+          - "{{ affinity_result.stdout_lines }}"

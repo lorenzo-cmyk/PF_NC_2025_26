@@ -95,6 +95,47 @@
           - "=== {{ inventory_hostname }} /etc/hosts ==="
           - "{{ hosts_verify.stdout_lines }}"
 
+- name: eTran evaluation — apply runtime NIC tuning
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Disable RX adaptive coalescing
+      ansible.builtin.command:
+        cmd: ethtool -C ens1f1np1 adaptive-rx off
+      changed_when: false
+      failed_when: false
+
+    - name: Set RX coalescing to zero
+      ansible.builtin.command:
+        cmd: ethtool -C ens1f1np1 rx-usecs 0
+      changed_when: false
+      failed_when: false
+
+    - name: Set RX frames coalescing to 1
+      ansible.builtin.command:
+        cmd: ethtool -C ens1f1np1 rx-frames 1
+      changed_when: false
+      failed_when: false
+
+    - name: Disable TX adaptive coalescing
+      ansible.builtin.command:
+        cmd: ethtool -C ens1f1np1 adaptive-tx off
+      changed_when: false
+      failed_when: false
+
+    - name: Set TX coalescing to 5 usec
+      ansible.builtin.command:
+        cmd: ethtool -C ens1f1np1 tx-usecs 5
+      changed_when: false
+      failed_when: false
+
+    - name: Disable flow control
+      ansible.builtin.command:
+        cmd: ethtool -A ens1f1np1 rx off tx off
+      changed_when: false
+      failed_when: false
+
 - name: eTran evaluation — ping all other nodes by hostname
   hosts: all
   become: false

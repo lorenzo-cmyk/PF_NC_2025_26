@@ -1,5 +1,23 @@
 # eTran Benchmark Session Notes
 
+## Ansible evaluation pipeline (run before every benchmark session)
+
+```bash
+# Always run: ARP, /etc/hosts, NIC coalescing, flow control
+.venv/bin/ansible-playbook playbooks/eTran/evaluation/01-network-prep.yml
+
+# Optional: IRQ affinity (queue count + core pinning)
+.venv/bin/ansible-playbook playbooks/eTran/evaluation/02-irq-affinity.yml
+
+# Optional: MTU (e.g. mtu=9000)
+.venv/bin/ansible-playbook playbooks/eTran/evaluation/03-mtu.yml --extra-vars 'mtu=9000'
+
+# Verify everything
+.venv/bin/ansible-playbook playbooks/eTran/evaluation/04-verify-network.yml
+```
+
+Reboot clears ARP table and /etc/hosts entries, so run `01-network-prep.yml` after each reboot.
+
 ## Critical procedure for running benchmarks
 
 Every metric requires:
@@ -14,12 +32,6 @@ Headless invocation:
 ssh node1 "cd /local/eTran/eTran/homa_app && timeout 10 env ETRAN_PROTO=homa ./cp_node client ... 2>&1"
 ```
 Use `env VAR=val` (NOT `timeout VAR=val command`) — timeout doesn't parse env prefixes.
-
-## After any reboot: re-run network prep
-```bash
-.venv/bin/ansible-playbook playbooks/eTran/evaluation/01-network-prep.yml
-```
-Reboot clears ARP table and /etc/hosts entries.
 
 ## BPF XDP_EGRESS patch (must be re-applied if source is re-cloned)
 File: `micro_kernel/eBPF/homa/main.c` lines 235-248
@@ -45,7 +57,6 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
 ## What NOT to do
 - Never use `--queues` on cp_node client — kills throughput (e.g. 1045→86 Kops)
 - Never use `-b` (busy-poll) on micro_kernel — breaks Homa benchmark
-- Never use `tuned-adm off` or zero coalescing — reduces throughput
 - Never double `umem_num_frames` — doesn't help, causes overhead
 - Never skip shm cleanup between metrics — causes silent failures
 
@@ -59,11 +70,15 @@ done
 ```
 
 ## Hardware
-- CloudLab xl170, 10-core E5-2640v4 × 1 socket, Mellanox ConnectX-5 100G
+- CloudLab xl170, 10-core E5-2640v4 × 1 socket, Mellanox ConnectX-4 Lx 25G
 - Paper used 2 sockets (20 cores) + ConnectX-4 25G on same node type
-- NIC: `ens1f1np1`, Homa port range 4000-5007, TCP port 50000
-- When SMT=off: 10 logical cores, NIC has 10 combined queues → `-q 10`
-- When SMT=on: 20 logical cores, NIC has 20 combined queues → `-q 20` works but hurts perf
+- NIC: `ens1f1np1` (PCI 0000:03:00.1), NUMA node 0
+- SMT=off: 10 logical cores, NIC has 10 combined queues → `-q 10`
+
+## Ansible playbook structure
+- `playbooks/eTran/setup/` — one-time: system deps, kernel build, install eTran
+- `playbooks/eTran/tuning/` — one-time (persists reboot): SMT off, mitigations off, tuned
+- `playbooks/eTran/evaluation/` — per-session: ARP, hosts, NIC tuning, IRQ affinity, MTU, verify
 
 ## Ansible inventory
 - `@server` = node0, `@clients` = node1–node9
