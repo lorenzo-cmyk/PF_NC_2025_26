@@ -74,10 +74,11 @@ done
 - Paper used 2 sockets (20 cores) + ConnectX-4 25G on same node type
 - NIC: `ens1f1np1` (PCI 0000:03:00.1), NUMA node 0
 - SMT=off: 10 logical cores, NIC has 10 combined queues → `-q 10`
+- C-states=off (`intel_idle.max_cstate=0`), ASPM=off — required for sub-15µs latency metrics
 
 ## Ansible playbook structure
 - `playbooks/eTran/setup/` — one-time: system deps, kernel build, install eTran
-- `playbooks/eTran/tuning/` — one-time (persists reboot): SMT off, mitigations off, tuned
+- `playbooks/eTran/tuning/` — one-time (persists reboot): SMT off, mitigations off, C-states off, ASPM off, tuned
 - `playbooks/eTran/evaluation/` — per-session: ARP, hosts, NIC tuning, IRQ affinity, MTU, verify
 
 ## Ansible inventory

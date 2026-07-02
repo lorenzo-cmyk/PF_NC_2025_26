@@ -1,25 +1,47 @@
 ---
-- name: eTran node tuning — disable SMT and mitigations via GRUB
+- name: eTran node tuning — boot parameters (SMT, mitigations, C-states, ASPM)
   hosts: all
   become: true
   tasks:
-    - name: Add nosmt and mitigations=off to GRUB_CMDLINE_LINUX
-      ansible.builtin.lineinfile:
-        path: /etc/default/grub
-        regexp: '^GRUB_CMDLINE_LINUX="((?!nosmt|mitigations=off).*)"$'
-        line: 'GRUB_CMDLINE_LINUX="\1 nosmt mitigations=off"'
-        backrefs: true
-      register: grub
+    - name: Check current GRUB_CMDLINE_LINUX
+      ansible.builtin.shell:
+        cmd: grep '^GRUB_CMDLINE_LINUX=' /etc/default/grub
+      register: grub_current
+      changed_when: false
 
-    - name: Update GRUB
+    - name: Add nosmt and mitigations=off if missing
+      ansible.builtin.shell:
+        cmd: |
+          if grep -q 'nosmt' /etc/default/grub && grep -q 'mitigations=off' /etc/default/grub; then
+            echo ok
+          else
+            sed -i '/^GRUB_CMDLINE_LINUX=/s/"$/ nosmt mitigations=off"/' /etc/default/grub
+            echo changed
+          fi
+      register: grub_smt
+      changed_when: grub_smt.stdout == 'changed'
+
+    - name: Add C-state and ASPM tuning if missing
+      ansible.builtin.shell:
+        cmd: |
+          if grep -q 'intel_idle.max_cstate=0' /etc/default/grub; then
+            echo ok
+          else
+            sed -i '/^GRUB_CMDLINE_LINUX=/s/"$/ intel_idle.max_cstate=0 pcie_aspm=off"/' /etc/default/grub
+            echo changed
+          fi
+      register: grub_cstates
+      changed_when: grub_cstates.stdout == 'changed'
+
+    - name: Update GRUB if any params changed
       ansible.builtin.command:
         cmd: update-grub
-      when: grub.changed
+      when: grub_smt.changed or grub_cstates.changed
 
-    - name: Reboot if GRUB was modified
+    - name: Reboot if any params changed
       ansible.builtin.reboot:
         reboot_timeout: 600
-      when: grub.changed
+      when: grub_smt.changed or grub_cstates.changed
 
     - name: Verify SMT disabled
       ansible.builtin.shell:
@@ -33,8 +55,33 @@
       register: mitigations_status
       changed_when: false
 
+    - name: Verify C-states disabled
+      ansible.builtin.shell:
+        cmd: |
+          if grep -q 'intel_idle.max_cstate=0' /proc/cmdline; then
+            echo "disabled (intel_idle.max_cstate=0)"
+          else
+            echo "ENABLED — C-states active"
+          fi
+      register: cstate_status
+      changed_when: false
+
+    - name: Verify ASPM off
+      ansible.builtin.shell:
+        cmd: |
+          if grep -q 'pcie_aspm=off' /proc/cmdline; then
+            echo "disabled"
+          else
+            policy=$(cat /sys/module/pcie_aspm/parameters/policy 2>/dev/null || echo "unknown")
+            echo "aspm=$policy"
+          fi
+      register: aspm_status
+      changed_when: false
+
     - name: Status
       ansible.builtin.debug:
         msg:
           - "{{ inventory_hostname }}: SMT={{ smt_status.stdout }}"
           - "{{ inventory_hostname }}: mitigations={{ mitigations_status.stdout }}"
+          - "{{ inventory_hostname }}: C-states={{ cstate_status.stdout }}"
+          - "{{ inventory_hostname }}: ASPM={{ aspm_status.stdout }}"

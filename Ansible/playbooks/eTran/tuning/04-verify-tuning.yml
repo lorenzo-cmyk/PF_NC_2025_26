@@ -11,6 +11,15 @@
       register: smt
       changed_when: false
 
+    - name: Check C-states and ASPM
+      ansible.builtin.shell:
+        cmd: |
+          echo "cstates=$(grep -q 'intel_idle.max_cstate=0' /proc/cmdline && echo disabled || echo ENABLED)"
+          echo "aspm=$(grep -q 'pcie_aspm=off' /proc/cmdline && echo disabled || echo "$(cat /sys/module/pcie_aspm/parameters/policy 2>/dev/null || echo unknown)")"
+          echo "cpuidle_states=$(ls /sys/devices/system/cpu/cpu0/cpuidle/ 2>/dev/null | grep -c state || echo 0)"
+      register: cstates
+      changed_when: false
+
     - name: Check tuned installed and active
       ansible.builtin.shell:
         cmd: |
@@ -44,6 +53,7 @@
         msg:
           - "=== {{ inventory_hostname }} VERIFICATION ==="
           - "{{ smt.stdout_lines }}"
+          - "{{ cstates.stdout_lines }}"
           - "{{ tuned.stdout_lines }}"
           - "{{ sysbench.stdout_lines }}"
           - "=== POST-TUNING BENCHMARK ==="
