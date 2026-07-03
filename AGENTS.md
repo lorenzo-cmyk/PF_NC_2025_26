@@ -192,8 +192,8 @@ wait
 
 ## Ansible inventory
 - `@server` = node0, `@clients` = node1–node9
-- **NOTE:** `profile.py` at repo root provisions only 4 nodes (node0–node3), not 10.
-  Metrics 7–12 (all-to-all cluster) require 7+ nodes and cannot be tested.
+- **NOTE:** `profile.py` at repo root is stale (shows `node_count=4`). The actual
+  deployment has 10 nodes (node0–node9), making Metrics 7–12 testable.
 - Paper PDF: `nsdi25-chen-zhongjie.pdf` in repo root
 
 ## Key source files
