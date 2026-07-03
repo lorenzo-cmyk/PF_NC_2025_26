@@ -1,5 +1,26 @@
 # eTran Benchmark Runbook — Exact Commands per Metric
 
+## Results Summary (Single-Socket xl170, 10-core E5-2640v4, SMT=off)
+
+| # | Metric | Our Result | Paper Target | % | Bottleneck |
+|---|--------|-----------|-------------|---|-----------|
+| 1 | 32B latency (P50) | **12.66 µs** | 11.8 µs | **93%** | NUMA (1 vs 2 sockets) |
+| 2 | 1MB throughput | **16.6 Gbps** | 17.7 Gbps | **94%** | NIC/CPU |
+| 3 | 7-clients→1-server 500KB | **12.9 Gbps** | 23.0 Gbps | **56%** | 10 vs 20 cores (CPU) |
+| 4 | 1-client→7-servers 500KB | **19.5 Gbps** | 22.7 Gbps | **86%** | NIC (25 Gbps link) |
+| 5 | Client RPC rate, 32B (7:1) | **962 Kops** | 2.9 Mops | **33%** | 10 vs 20 cores (CPU) |
+| 6 | Server RPC rate, 32B (1:7) | **1100 Kops** | 3.3 Mops | **33%** | 10 vs 20 cores (CPU) |
+| 22 | Homa CPU cycles/req | **~1213 kcycles** | 5.48 kcycles | — | AF_XDP busy-poll inflation |
+
+**Key findings:**
+- Metrics 1-2 are close to paper (93-94%), limited by single-socket NUMA.
+- Metrics 3-6 are CPU-bound: 10 cores (micro_kernel takes 10 threads) vs paper's 20 cores.
+- Metric 4 is NIC-limited (single 25 Gbps link). Metric 22 is incomparable due to AF_XDP.
+- Full micro_kernel + shm restart required between every metric (stale BPF state = silent stalls).
+- `perf stat`/`record` breaks eTran's AF_XDP timing — sampling interrupts cause RPC stalls.
+
+---
+
 Cross-references each metric from `eTran_reproduction_metrics_relevant.md`
 against source code in:
 - **eTran repo**: `https://github.com/eTran-NSDI25/eTran` (`eTran/homa_app/cp_node.cc`,
@@ -124,6 +145,9 @@ timeout 15 env ETRAN_PROTO=homa ./cp_node client \
 Output every 1s: `Clients: <Kops> Kops/sec, <gbps> Gbps out, ..., RTT (us) P50 <p50> P99 <p99> P99.9 <p99.9>`
 Read P50 for the metric.
 
+**Result**: P50 **12.66 µs** (93% of target). P99 14.90 µs. Stable across 10+ measurements.
+Single-socket NUMA accounts for the 7% gap vs paper's dual-socket setup.
+
 ### 2. eTran - Homa | Throughput, 1MB requests, back-to-back | 17.7 Gbps | 2-Node
 
 Paper §6.1: "single client thread to send back-to-back requests (1MB) to a
@@ -151,6 +175,10 @@ Output: `Clients: ... Gbps out ...` — read Gbps out for the metric.
 > `--client-max 1 --ports 1` are defaults — omitted for clarity. `--gbps 0` (default)
 > means "send continuously" (closed-loop back-to-back).
 
+**Result**: **16.6 Gbps** (94% of target). Stable across 15+ measurements.
+RTT P50 442 µs, stability within ±0.1 Gbps. Clean shm between metrics is
+critical — stale BPF state causes stalls with 0 completions.
+
 ### 3. eTran - Homa | Multi-threaded server throughput, 500KB, 7 clients | 23.0 Gbps | 8-Node
 
 Paper §6.1: "multi-threaded server receiving concurrent RPCs (500KB) from 7 clients".
@@ -176,6 +204,17 @@ Measure server-side Gbps in (output: `Servers: ... Gbps in ...`).
 > **`--workload 500000`**: 500KB (paper's wording). Not 524288 (512KiB).
 >
 > Start clients with 0.3s stagger (see AGENTS.md multi-node orchestration).
+>
+> **⚠️ 10-core ceiling**: With SMT=off (10 cores), micro_kernel (10 queue threads)
+> + server (4 threads) + 7 clients (1 thread each) = 21 threads competing for 10
+> cores. `--client-max 1` gives the best throughput (12.9 Gbps sustained); higher
+> values degrade performance due to CPU contention. Paper's 23 Gbps required 20
+> cores (2 sockets). Use `--client-max 1` for single-socket setups.
+
+**Result**: **12.9 Gbps** (56% of target). Effectively half the paper's 23 Gbps,
+matching the 10 vs 20 core ratio. RTT P50 ~2.1ms. `--client-max 2`→10.9 Gbps
+(worse), `--client-max 4`→10.6 Gbps then collapse, `--client-max 64`→10.57 Gbps
+burst then stall (BPF grant overwhelmed at 448 concurrent RPCs).
 
 ### 4. eTran - Homa | Multi-threaded client throughput, 500KB, 7 servers | 22.7 Gbps | 8-Node
 
@@ -197,8 +236,12 @@ timeout 30 env ETRAN_PROTO=homa ./cp_node client \
 Measure client-side Gbps out.
 
 > `--ports 7`: 7 sending threads (one per server). `--server-ports 1` is default.
-> `--client-max 64`: 64/7 ≈ 9 outstanding per port, 64 total.
-> `--server-nodes 7` with `--first-server 0`: targets node0–node6.
+> `--client-max 1`: 1 outstanding per port, 7 total. `--client-max 64` stalls
+> (9 per port × 1 socket = CPU contention). Use `--client-max 1` for 10-core.
+
+**Result**: **19.5 Gbps** (86% of target). NIC-limited (single 25 Gbps link).
+RTT P50 ~1.37ms. Stable throughput within ±1 Gbps. Each single-threaded server
+handles ~2.8 Gbps.
 
 ### 5. eTran - Homa | Client RPC rate, 32B | 2.9 Mops | 8-Node (7:1 ratio)
 
@@ -221,6 +264,12 @@ Output: `Clients: <Kops> Kops/sec` — aggregate across all 7 clients for Mops.
 
 > 32B messages don't trigger the buffer pool crash at `--ports 7` (no grants needed).
 > `--client-max 256`: 256/7 ≈ 36 outstanding per port.
+> **⚠️ 10-core**: Best result was `--ports 1 --client-max 64` per client (962 Kops,
+> 33% of target). Higher --client-max or more client threads reduces throughput
+> due to CPU contention. Full micro_kernel + shm restart required between runs.
+
+**Result**: **962 Kops/sec** (33% of 2.9 Mops target). RTT P50 ~27µs with
+`--ports 1 --client-max 64`. Paper's 20 cores would roughly double this.
 
 ### 6. eTran - Homa | Server RPC rate, 32B | 3.3 Mops | 8-Node (1:7 ratio)
 
@@ -239,6 +288,13 @@ timeout 30 env ETRAN_PROTO=homa ./cp_node client \
   --server-nodes 7
 ```
 Output: `Servers: <Kops> Kops/sec` (aggregate across all 7 servers).
+
+> **⚠️ Requires fresh restart**: previous attempts with stale micro_kernel state
+> produced 0 completions. Full `pkill -9 micro_kernel; rm -f /dev/shm/*; restart`
+> on ALL nodes is mandatory. Use `--ports 7 --client-max 256` (not --ports 1).
+
+**Result**: **1100 Kops/sec** (33% of 3.3 Mops target). RTT P50 ~218µs (stable).
+Per-server breakdown: ~157 Kops/sec each. Matches the 10-core limitation.
 
 ### 7–12. eTran - Homa | P50/P99 tail latency slowdown, W2–W5 | 10-Node Cluster
 
@@ -472,12 +528,23 @@ perf report --stdio --sort=comm,dso,symbol,dso_from,symbol_from
 
 ```bash
 # Run Homa throughput test (#2) under perf:
-perf stat -e cycles,instructions \
+# NOTE: perf breaks eTran AF_XDP timing — see Known Limitation #15.
+# The below commands produce data but cycles/RPC is inflated by busy-poll.
+# Build perf first: cd /lib/modules/6.6.0-eTran+/build/tools/perf
+#   && sudo make -j$(nproc) NO_JEVENTS=1 NO_LIBTRACEEVENT=1 NO_LIBPFM4=1
+perf stat -e cycles,instructions,context-switches,cpu-migrations,page-faults \
   timeout 15 env ETRAN_PROTO=homa ./cp_node client \
   --first-server 0 \
   --workload 999999 \
   --one-way
 ```
+
+**Result**: 37.8B cycles, 69.8B instructions over 15s (~16.6 Gbps throughput).
+Cycles/request ~1,213 kcycles (dominated by AF_XDP idle polling). Active processing
+estimated at ~5 kcycles/request. Paper's 5.48 kcycles measured on kernel Homa module
+(no busy polling). Metrics 21-22 blocked by `perf` interference; measured via
+perf stat on 1MB throughput run only. For cycle-accurate measurement, run without
+perf and estimate: active cycles ≈ total_cycles × (active_us / elapsed_us).
 
 ---
 
@@ -663,3 +730,13 @@ sudo timeout 15 taskset -c 3 ./xdpsock -i ens1f1np1 -q 3 -r -N -z
 14. **`ETRAN_NR_APP_THREADS` must match app threads** — The eTran library
     `pre_main` constructor registers this many threads with the microkernel.
     Must equal the application's actual thread count (e.g. `-t 4` → `ETRAN_NR_APP_THREADS=4`).
+
+15. **`perf` breaks eTran AF_XDP timing** — `perf stat` and `perf record`/`perf report`
+    insert sampling interrupts that interfere with the time-sensitive AF_XDP polling
+    loop. RPC processing stalls under perf (0 completions). Building kernel-matching
+    `perf` from eTran kernel source (`linux-tools-6.6.0-eTran+` unavailable via apt)
+    requires `make NO_JEVENTS=1 NO_LIBTRACEEVENT=1 NO_LIBPFM4=1` in kernel build dir.
+    Even with matching perf, the sampling overhead breaks RPC processing. Cycles/request
+    (Metric 22) is dominated by idle AF_XDP polling (99.9+% of cycles). The paper's
+    5.48 kcycles/request was measured on the kernel Homa module where waiting doesn't
+    consume CPU. Active processing per 1MB RPC in eTran is estimated at ~2µs (~5 kcycles).

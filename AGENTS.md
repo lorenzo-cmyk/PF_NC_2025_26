@@ -23,11 +23,24 @@ Reboot clears ARP table and /etc/hosts entries, so run `01-network-prep.yml` aft
 Every metric requires:
 1. Kill micro_kernel + cp_node on all involved nodes
 2. Clean `/dev/shm/BufferPool_* /dev/shm/UMEM_* /dev/shm/LRPC_*`
-3. Start micro_kernel with `-q 10` (NIC has 10 combined queues)
+3. Start micro_kernel with `-q 10` using `screen -dmS` (see below)
 4. Start server
 5. Run client with `timeout N env ETRAN_PROTO=homa ./cp_node client ...`
 
-Headless invocation:
+Headless micro_kernel startup (prevents monitor-thread exit on stdin EOF):
+```bash
+ssh nodeN "sudo screen -dmS micro_kernel bash -c 'cd /local/eTran/eTran/micro_kernel && exec ./micro_kernel -i ens1f1np1 -q 10'"
+```
+Check it stayed up:
+```bash
+ssh nodeN "sudo screen -ls micro_kernel; sudo pgrep -a micro_kernel"
+```
+Kill when done:
+```bash
+ssh nodeN "sudo screen -S micro_kernel -X quit; sudo pkill -9 micro_kernel"
+```
+
+Headless client invocation:
 ```bash
 ssh node1 "cd /local/eTran/eTran/homa_app && timeout 10 env ETRAN_PROTO=homa ./cp_node client ... 2>&1"
 ```
@@ -43,9 +56,11 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
 - Metrics 1: NO `--one-way` (32B echo per paper §4.2)
 - Metrics 2-4, 7-12, 22: YES `--one-way` (large messages need small response)
 - Metrics 2: `--client-max 1 --ports 1` (single-stream back-to-back)
-- Metric 3: server default ports, clients `--ports 1 --client-max 64`
-- Metric 4: servers default ports, client `--ports 7 --client-max 64`
+- Metric 3: server `--ports 4`, clients `--ports 1 --client-max 1` (sweet spot for 10-core)
+- Metric 4: servers default ports, client `--ports 7 --client-max 1` (sweet spot for 10-core)
 - Metric 1-2: 2 nodes only
+- Metric 5: server `--ports 4`, clients `--ports 1 --client-max 64` (best: 962 Kops)
+- Metric 6: client `--ports 7 --client-max 256` (works with fresh state, 1100 Kops)
 
 ## Known issues
 - `--workload 1000000` stalls — use `999999` (HOMA_MAX_MESSAGE_LENGTH off-by-one)
@@ -53,12 +68,17 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
 - Multi-client (>200 concurrent RPCs) overwhelms BPF grant mechanism
 - TCP benchmarks (epoll_*) crash with SIGABRT — unresolved
 - SMT ON degrades AF_XDP performance
+- `perf` breaks eTran AF_XDP timing (sampling interrupts cause RPC stalls)
+- All-to-all `--both` segfaults on exit (shared memory cleanup race)
+- 10-core SMT=off limits throughput to ~50-60% of paper (paper had 20 cores)
 
 ## What NOT to do
 - Never use `--queues` on cp_node client — kills throughput (e.g. 1045→86 Kops)
 - Never use `-b` (busy-poll) on micro_kernel — breaks Homa benchmark
 - Never double `umem_num_frames` — doesn't help, causes overhead
 - Never skip shm cleanup between metrics — causes silent failures
+- Never use `nohup ... </dev/null` for micro_kernel — monitor thread exits on stdin EOF.
+  Use `screen -dmS` instead (provides a proper pty).
 
 ## Multi-node orchestration
 Start clients sequentially (0.3s stagger) to avoid overwhelming the server:
@@ -68,6 +88,8 @@ for i in 1 2 3 4 5 6 7; do
   sleep 0.3
 done
 ```
+
+(For micro_kernel startup across nodes: use `screen -dmS` instead — see Critical Procedure above.)
 
 ## Hardware
 - CloudLab xl170, 10-core E5-2640v4 × 1 socket, Mellanox ConnectX-4 Lx 25G

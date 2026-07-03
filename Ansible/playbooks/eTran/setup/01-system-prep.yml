@@ -30,6 +30,7 @@
       - automake
       - libtool
       - pkg-config
+      - screen
   tasks:
     - name: Update apt package cache
       ansible.builtin.apt:
