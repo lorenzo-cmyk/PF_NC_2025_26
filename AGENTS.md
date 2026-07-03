@@ -113,18 +113,32 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
 - Metric 1-2: 2 nodes only
 - Metric 5: server `--ports 4`, clients `--ports 1 --client-max 64` (best: 962 Kops)
 - Metric 6: client `--ports 7 --client-max 256` (works with fresh state, 1100 Kops)
+- Metrics 13-21: TCP benchmarks, use `script -q -c` over SSH for visible output
+- Metric 15: stagger clients 0.5s apart to avoid overwhelming server
+- Metrics 19-20: KV latency beats paper targets (14 vs 17.2 µs P50, 16 vs 27.5 µs P99)
 
 ## Known issues
 - `--workload 1000000` stalls — use `999999` (HOMA_MAX_MESSAGE_LENGTH off-by-one)
 - Server `--ports > 4` crashes buffer pool (`nr_slabs_avail` assertion)
 - Multi-client (>200 concurrent RPCs) overwhelms BPF grant mechanism
-- TCP benchmarks (epoll_*) crash with SIGABRT — unresolved
+- **TCP benchmarks now work** — the earlier SIGABRT was fixed by the BPF XDP_EGRESS
+  patch (it affected TCP egress paths too, not just Homa grants). Metrics 13-15 and
+  18-21 confirmed working.
 - **SMT ON breaks eTran entirely** — AF_XDP busy-polling gets 0 completions
   regardless of queue count or IRQ pinning. Paper also notes SMT degrades AF_XDP.
   SMT=off (via `nosmt` in GRUB) is mandatory.
-- `perf` breaks eTran AF_XDP timing (sampling interrupts cause RPC stalls)
+- `perf` breaks Homa AF_XDP but works fine for TCP benchmarks (Metric 21 completed
+  with 50.7B cycles under perf). The microkernel's polling on separate threads is
+  not disrupted by perf on the application thread.
+- TCP connection drop after ~9s: "Connection is closed by microkernel" from
+  `lib/socket.cc:405`. The microkernel closes TCP state after idle. Benchmark
+  produces valid data before the drop. Use `timeout 15` for clean runs.
+- epoll_* and flexkvs output is hidden over SSH (C stdout buffering). Use
+  `script -q -c 'command' /dev/null` to force line-buffered output.
 - All-to-all `--both` segfaults on exit (shared memory cleanup race)
 - 10-core SMT=off limits throughput to ~50-60% of paper (paper had 20 cores)
+- flexkvs_server hardcodes port 11211; flexkvs_bench `--time`/`--warmup`/`--cooldown`
+  are stored but never enforced — always wrap in `timeout`.
 
 ## What NOT to do
 - Never use `--queues` on cp_node client — kills throughput (e.g. 1045→86 Kops)
@@ -136,6 +150,7 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
 - Never use `timeout` on the server or micro_kernel — wrap them in `screen` instead.
 - Never assume `grep mlx5_comp` targets the right PCI device — there are 2 mlx5 NICs.
   Always verify the PCI slot: `0000:03:00.1` for `ens1f1np1`.
+- Never run epoll_* or flexkvs_bench without `timeout` — they loop forever.
 
 ## Multi-node orchestration
 ```bash
