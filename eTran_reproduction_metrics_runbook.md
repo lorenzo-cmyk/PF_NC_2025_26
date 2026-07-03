@@ -6,23 +6,43 @@
 |---|--------|-----------|-------------|---|-----------|
 | 1 | 32B latency (P50) | **12.66 µs** | 11.8 µs | **93%** | NUMA (1 vs 2 sockets) |
 | 2 | 1MB throughput | **16.6 Gbps** | 17.7 Gbps | **94%** | NIC/CPU |
-| 3 | 7-clients→1-server 500KB | **12.9 Gbps** | 23.0 Gbps | **56%** | 10 vs 20 cores (CPU) |
-| 4 | 1-client→7-servers 500KB | **19.5 Gbps** | 22.7 Gbps | **86%** | NIC (25 Gbps link) |
-| 5 | Client RPC rate, 32B (7:1) | **962 Kops** | 2.9 Mops | **33%** | 10 vs 20 cores (CPU) |
-| 6 | Server RPC rate, 32B (1:7) | **1100 Kops** | 3.3 Mops | **33%** | 10 vs 20 cores (CPU) |
-| 13 | TCP 1KB throughput | **7.25 Gbps** | 4.8× Linux | — | Need Linux-TCP baseline |
-| 14 | TCP 2KB throughput | **12.34 Gbps** | 0.87× TAS | — | Need TAS baseline |
-| 15 | TCP 1K persistent conns, 64B | **~2 Mops** | 2.26× Linux | — | Need Linux-TCP baseline |
-| 18 | TCP KV throughput | **0.53 Mops** | 2.4-4.8× Linux | — | Need Linux-TCP baseline |
-| 19 | TCP KV P50 latency | **14 µs** | 17.2 µs | **122%** | Beats paper target |
-| 20 | TCP KV P99 latency | **16 µs** | 27.5 µs | **172%** | Beats paper target |
+| 3 | 7-clients→1-server 500KB | **~13 Gbps** (micro_kernel pinned core 9, server cores 0-7) | 23.0 Gbps | **56%** | Homa grant/egress XDP_GEN dispatch (per-CPU eBPF state), not thread oversubscription |
+| 4 | 1-client→7-servers 500KB | **~17 Gbps** | 22.7 Gbps | **75%** | NIC (single 25 Gbps link) + Homa grant pacing |
+| 5 | Client RPC rate, 32B (7:1) | **1040 Kops** aggregate peak / 800 K steady (mk core 9, server cores 0-7) | 2.9 Mops | **28%** | Single-threaded microkernel RX poll_loop caps per-node ingress; CPU contention |
+| 6 | Server RPC rate, 32B (1:7) | **~820 K steady / 1099 K client-side** (mk core 9, server cores 0-7, --client-max 128) | 3.3 Mops | **25%** | Same single-threaded microkernel RX poll_loop |
+| 13 | TCP 1KB throughput | **7.18 Gbps** (single-threaded, mk core 9, app cores 0-7) | 4.8× Linux | — | Raw number captured; ratio needs Linux-TCP baseline |
+| 14 | TCP 2KB throughput | **12.30 Gbps** (single-threaded, mk core 9, app cores 0-7) | 0.87× TAS | — | Raw number captured; ratio needs TAS baseline |
+| 15 | TCP 1K persistent conns, 64B | **770 Kops peak / 230 K steady aggregate** (10-thr server, 5 clients × 200 conns, mk core 9) | 2.26× Linux | — | Previous claim of ~2 Mops was burst artifact; steady-state is ~230 K, early burst ~770 K. Connection drop after ~9s limits window |
+| 18 | TCP KV throughput | **0.89 Mops peak / 0.72 M steady aggregate** (5 clients, 4 threads, 16 pending, mk core 9) | 2.4-4.8× Linux | — | Raw number captured; ratio needs Linux-TCP baseline |
+| 19 | TCP KV P50 latency | **14 µs** | 17.2 µs | **122%** | Beats paper target; confirmed with pinned mk |
+| 20 | TCP KV P99 latency | **16 µs** | 27.5 µs | **172%** | Beats paper target; confirmed with pinned mk |
 | 21 | TCP CPU cycles/req | **~2.9 kcycles** | 4.37 kcycles | — | Client-side only (rough) |
 | 22 | Homa CPU cycles/req | **~1213 kcycles** | 5.48 kcycles | — | AF_XDP busy-poll inflation |
 
 **Key findings:**
+- **Microkernel threading model verified**: micro_kernel has only 3 threads total
+  (main + `control_loop` + `monitor`). The single `control_loop` thread runs
+  poll_network/poll_lrpc/poll_uds/poll_tcp_cc_to in a busy loop and is the
+  single CPU-thread RX dispatch for ALL queues. Earlier notes claiming
+  "10 queue threads per micro_kernel" are WRONG. The control_loop is
+  *internally* pinned to `CP_CPU = 19` (defs.h), which is OFFLINE under our
+  `nosmt` (cores 10-19 are SMT siblings of 0-9) — so `pthread_setaffinity_np`
+  silently fails and control_loop roams cores 0-9.
+- The dominant metric 3/5/6 bottleneck is NOT "21 threads competing for 10 cores",
+  but the single-threaded microkernel RX dispatch_loop on the server (and per-sender
+  on each client). Per-server-thread RPC rate plateaus ~185 Kops regardless of port count.
+- Affinity prescription that helps metrics 5/6: `taskset -c 9 ./micro_kernel`
+  (mk on core 9, dedicated — gives ~5-25% per-client throughput gain by removing
+  core migration of the busy-poll control_loop), server/client app threads on
+  cores 0-7 or 0-6. **Pin mk to a HIGHER core (8 or 9); pinning to core 0
+  breaks the run** (core 0 carries IRQ/mlx5_comp extra housekeeping contention).
+- Metric 3 is bounded by Homa grant dispatch through the XDP_GEN tail-call
+  BPF (`homa/main.c`) which uses per-CPU state (`granting_idx[cpu]`,
+  `nr_grant_candidate[cpu]`, `HOMA_OVERCOMMITMENT=8`). Higher server ports do
+  NOT raise throughput because the egress grant loop scales with CPU count
+  and our 10-core eTran box has half the grant dispatch capacity of paper's 20 cores.
 - Metrics 1-2 are close to paper (93-94%), limited by single-socket NUMA.
-- Metrics 3-6 are CPU-bound: 10 cores (micro_kernel takes 10 threads) vs paper's 20 cores.
-- Metric 4 is NIC-limited (single 25 Gbps link). Metric 22 is incomparable due to AF_XDP.
+- Metric 4 is single-NIC-limited (25 Gbps link, ~17-19.5 Gbps reachable).
 - TCP benchmarks all work — the earlier SIGABRT was fixed by the BPF XDP_EGRESS patch.
 - KV latency (metrics 19-20) **beats paper targets** (14 vs 17.2 µs P50, 16 vs 27.5 µs P99).
 - `perf stat` works for TCP benchmarks but breaks Homa's AF_XDP polling (sampling interrupts cause RPC stalls).
@@ -66,18 +86,28 @@ against source code in:
    Use `screen -dmS` for micro_kernel and server (they persist across runs).
    Clients are ephemeral — always wrap in `timeout`.
 
-   ```bash
-   # Kill everything, clean shm, start micro_kernels, start server, run client:
-   ssh node0 'sudo pkill -9 cp_node; sudo pkill -9 micro_kernel'
-   ssh node1 'sudo pkill -9 cp_node; sudo pkill -9 micro_kernel'
-   ssh node0 'sudo rm -f /dev/shm/BufferPool_* /dev/shm/UMEM_* /dev/shm/LRPC_*'
-   ssh node1 'sudo rm -f /dev/shm/BufferPool_* /dev/shm/UMEM_* /dev/shm/LRPC_*'
+```bash
+    # Kill everything, clean shm, start micro_kernels, start server, run client:
+    #   NOTE: use `pgrep -x micro_kernel` and `kill` BY PID, not `pkill -f micro_kernel`
+    #         (pkill -f matches its own cmdline, self-killing before reaching the targets).
+    #   NOTE: after a SIGKILLed micro_kernel you may have an orphaned XDP program
+    #         still attached to the NIC -- detach it explicitly, or the next
+    #         micro_kernel load will fail or silently no-op.
+    ssh node0 'for p in $(pgrep -x micro_kernel) $(pgrep -x cp_node); do sudo kill -9 $p; done; \
+       sudo ip link set dev ens1f1np1 xdp off 2>/dev/null; \
+       sudo rm -f /dev/shm/BufferPool_* /dev/shm/UMEM_* /dev/shm/LRPC_*'
+    ssh node1 'for p in $(pgrep -x micro_kernel) $(pgrep -x cp_node); do sudo kill -9 $p; done; \
+       sudo ip link set dev ens1f1np1 xdp off 2>/dev/null; \
+       sudo rm -f /dev/shm/BufferPool_* /dev/shm/UMEM_* /dev/shm/LRPC_*'
 
-   ssh node0 "sudo screen -dmS micro_kernel bash -c 'cd /local/eTran/eTran/micro_kernel && exec ./micro_kernel -i ens1f1np1 -q 10'"
-   ssh node1 "sudo screen -dmS micro_kernel bash -c 'cd /local/eTran/eTran/micro_kernel && exec ./micro_kernel -i ens1f1np1 -q 10'"
-   sleep 5
+    # Affinity recipe (recommended): pin micro_kernel to a dedicated CORE (use 8 or 9,
+    # NEVER 0 -- core 0 shares IRQ/mlx5_comp housekeeping and breaks mk startup),
+    # and pin app threads to the remaining cores.
+    ssh node0 "sudo screen -dmS micro_kernel bash -c 'cd /local/eTran/eTran/micro_kernel && exec taskset -c 9 ./micro_kernel -i ens1f1np1 -q 10'"
+    ssh node1 "sudo screen -dmS micro_kernel bash -c 'cd /local/eTran/eTran/micro_kernel && exec taskset -c 9 ./micro_kernel -i ens1f1np1 -q 10'"
+    sleep 5
 
-   ssh node0 "sudo screen -dmS server bash -c 'cd /local/eTran/eTran/homa_app && exec env ETRAN_PROTO=homa ./cp_node server'"
+    ssh node0 "sudo screen -dmS server bash -c 'cd /local/eTran/eTran/homa_app && exec env ETRAN_PROTO=homa taskset -c 0-7 ./cp_node server'"
    sleep 3
 
    ssh node1 "timeout 15 env ETRAN_PROTO=homa ./cp_node client ... 2>&1"

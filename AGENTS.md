@@ -34,10 +34,13 @@ Every metric run follows this exact sequence:
 
 ```bash
 # 1. Kill everything on all involved nodes
+#    IMPORTANT: never use `pkill -f micro_kernel` -- it matches the
+#    pkill command's own cmdline and self-terminates before signalling
+#    the targets. Kill by PID via pgrep -x.
 for n in node0 node1 node2 ...; do
-  ssh $n "sudo pkill -9 cp_node; sudo pkill -9 micro_kernel; \
-    sudo screen -S server -X quit 2>/dev/null; \
-    sudo screen -S micro_kernel -X quit 2>/dev/null"
+  ssh $n "for p in \$(pgrep -x micro_kernel) \$(pgrep -x cp_node); do \
+      sudo kill -9 \$p 2>/dev/null; done; \
+    sudo ip link set dev ens1f1np1 xdp off 2>/dev/null"
 done
 
 # 2. Clean shared memory
@@ -46,15 +49,19 @@ for n in node0 node1 node2 ...; do
 done
 
 # 3. Start micro_kernel on all involved nodes with screen (no timeout)
+#    Recommended (improves metrics 5/6 by 5-25%): pin mk to a dedicated
+#    high core via `taskset -c 9`. NEVER pin to core 0 -- core 0 carries
+#    extra IRQ/mlx5_comp housekeeping and breaks mk startup at high load.
 for n in node0 node1 node2 ...; do
   ssh $n "sudo screen -dmS micro_kernel bash -c \
-    'cd /local/eTran/eTran/micro_kernel && exec ./micro_kernel -i ens1f1np1 -q 10'"
+    'cd /local/eTran/eTran/micro_kernel && exec taskset -c 9 ./micro_kernel -i ens1f1np1 -q 10'"
 done
 sleep 5
 
 # 4. Start server on node0 with screen (no timeout — stays alive for multiple runs)
+#    Pin server threads to cores 0-7 (leaving core 9 for mk).
 ssh node0 "sudo screen -dmS server bash -c \
-  'cd /local/eTran/eTran/homa_app && exec env ETRAN_PROTO=homa ./cp_node server'"
+  'cd /local/eTran/eTran/homa_app && exec env ETRAN_PROTO=homa taskset -c 0-7 ./cp_node server'"
 sleep 3
 
 # 5. Run clients with timeout (they exit when done)
@@ -122,18 +129,28 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
 - Metrics 1: NO `--one-way` (32B echo per paper §4.2)
 - Metrics 2-4, 7-12, 22: YES `--one-way` (large messages need small response)
 - Metrics 2: `--client-max 1 --ports 1` (single-stream back-to-back)
-- Metric 3: server `--ports 4`, clients `--ports 1 --client-max 1` (sweet spot for 10-core)
+- Metric 3: server `--ports 4` (or 5/7/10 — crashing has stopped happening
+  after the XDP_EGRESS patch; throughput is identical ~13 Gbps regardless of
+  port count), clients `--ports 1 --client-max 1`. With mk pinned to core 9 +
+  server pinned to cores 0-7, server-side reads ~13 Gbps. Bottleneck = Homa
+  grant dispatch (per-CPU XDP_GEN state), so adding ports does NOT help.
 - Metric 4: servers default ports, client `--ports 7 --client-max 1` (sweet spot for 10-core)
 - Metric 1-2: 2 nodes only
-- Metric 5: server `--ports 4`, clients `--ports 1 --client-max 64` (best: 962 Kops)
-- Metric 6: client `--ports 7 --client-max 256` (works with fresh state, 1100 Kops)
+- Metric 5: server `--ports 7` (32B safe from buffer-pool crash), clients
+  `--ports 1 --client-max 64`; with mk on core 9, server threads on cores 0-7,
+  peak ~1040 K / steady ~800 K (best).
+- Metric 6: client `--ports 7 --client-max 128 --server-nodes 7` (best new sweet spot);
+  mk pinned to core 9 on every node, servers pinned to cores 0-7. Steady ~820 K,
+  client-side ~1099 K.
 - Metrics 13-21: TCP benchmarks, use `script -q -c` over SSH for visible output
 - Metric 15: stagger clients 0.5s apart to avoid overwhelming server
 - Metrics 19-20: KV latency beats paper targets (14 vs 17.2 µs P50, 16 vs 27.5 µs P99)
 
 ## Known issues
 - `--workload 1000000` stalls — use `999999` (HOMA_MAX_MESSAGE_LENGTH off-by-one)
-- Server `--ports > 4` crashes buffer pool (`nr_slabs_avail` assertion)
+- Server `--ports > 4` crashes buffer pool (`nr_slabs_avail` assertion) — only
+  triggers under heavy traffic with Homa grants. `--ports 5/7/10` for 32B RPCs
+  (no grants) works fine; verify before relying on this note.
 - Multi-client (>200 concurrent RPCs) overwhelms BPF grant mechanism
 - **TCP benchmarks now work** — the earlier SIGABRT was fixed by the BPF XDP_EGRESS
   patch (it affected TCP egress paths too, not just Homa grants). Metrics 13-15 and
@@ -153,6 +170,30 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
 - 10-core SMT=off limits throughput to ~50-60% of paper (paper had 20 cores)
 - flexkvs_server hardcodes port 11211; flexkvs_bench `--time`/`--warmup`/`--cooldown`
   are stored but never enforced — always wrap in `timeout`.
+- **Micro_kernel threading model**: `ps -L` shows only 3 mk threads (main,
+  `control_loop` pinned to `CP_CPU=19` per `micro_kernel/runtime/defs.h`,
+  `monitor`). The single `control_loop` busy-polls poll_network/poll_lrpc over
+  ALL queues — there are NOT `-q`-many mk threads. With `nosmt`, cores 10-19
+  are offline SMT siblings of 0-9, so mk's internal pin to CP_CPU=19 silently
+  fails and the control_loop is left unconstrained (migrates across 0-9).
+  Pinning mk via `taskset -c 9` externally restores dedicated-core polling and
+  improves mid-size-RPC throughput (metrics 5/6) by 5-25%.
+- **Stale XDP program after kill -9**: if micro_kernel is SIGKILLed in D-state
+  (stuck on bpf_map_update_elem), the eTran BPF XDP program remains attached to
+  the NIC (`ip link show ens1f1np1 | grep xdp` displays `prog/xdp id NNN`).
+  The next `micro_kernel` launch will silently fail (XDP "already attached") and
+  you'll see `Outstanding client RPCs: N` without completions. Always clean with
+  `sudo ip link set dev ens1f1np1 xdp off` after kill.
+- **`screen -wipe` may hang**: on at least one node (node7 in our session),
+  `sudo screen -wipe` hangs after a crashed micro_kernel leaves a stale `.lock`
+  file in `/run/screen/S-root`. Use `sudo screen -ls` / kill by PID instead;
+  skip `screen -wipe` in orchestration scripts.
+- **D-state stuck mk on a node requires reboot**: a micro_kernel stuck in
+  BPF (`bpf_map_update_elem`, wchan in `/proc/<pid>/wchan`) cannot be exited
+  by SIGKILL — the BPF syscall is uninterruptible. Stays as Z/D until reboot.
+  If the affected node is critical (e.g., the lone client for metric 4), swap
+  it with another clean node (e.g. node8 or node9) for that metric instead of
+  rebooting the whole cluster.
 
 ## What NOT to do
 - Never use `--queues` on cp_node client — kills throughput (e.g. 1045→86 Kops)
