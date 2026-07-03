@@ -5,6 +5,9 @@
 Reboot resets: ARP table, /etc/hosts, NIC coalescing, flow control, queue count, IRQ affinity, MTU.
 
 ```bash
+# All ansible-playbook commands run from Ansible/ directory:
+cd Ansible
+
 # Required after every reboot:
 .venv/bin/ansible-playbook playbooks/eTran/evaluation/01-network-prep.yml
 .venv/bin/ansible-playbook playbooks/eTran/evaluation/02-irq-affinity.yml
@@ -183,12 +186,14 @@ wait
 - C-states=off (`intel_idle.max_cstate=0`), ASPM=off — required for sub-15µs latency metrics
 
 ## Ansible playbook structure
-- `playbooks/eTran/setup/` — one-time: system deps, kernel build, install eTran
-- `playbooks/eTran/tuning/` — one-time (persists reboot): SMT off, mitigations off, C-states off, ASPM off, tuned
-- `playbooks/eTran/evaluation/` — per-session (run after EVERY reboot): ARP, hosts, NIC tuning, IRQ affinity, MTU, verify
+- `Ansible/playbooks/eTran/setup/` — one-time: system deps, kernel build, install eTran
+- `Ansible/playbooks/eTran/tuning/` — one-time (persists reboot): SMT off, mitigations off, C-states off, ASPM off, tuned
+- `Ansible/playbooks/eTran/evaluation/` — per-session (run after EVERY reboot): ARP, hosts, NIC tuning, IRQ affinity, MTU, verify
 
 ## Ansible inventory
 - `@server` = node0, `@clients` = node1–node9
+- **NOTE:** `profile.py` at repo root provisions only 4 nodes (node0–node3), not 10.
+  Metrics 7–12 (all-to-all cluster) require 7+ nodes and cannot be tested.
 - Paper PDF: `nsdi25-chen-zhongjie.pdf` in repo root
 
 ## Key source files
