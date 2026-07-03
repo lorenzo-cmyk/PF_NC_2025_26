@@ -5,3 +5,4 @@
 - import_playbook: 03-build-kernel.yml
 - import_playbook: 04-reboot.yml
 - import_playbook: 05-install-eTran.yml
+- import_playbook: 06-verify-all.yml

@@ -37,15 +37,8 @@ against source code in:
    cd /local/eTran/eTran/micro_kernel
    sudo ./micro_kernel -i ens1f1np1 -q 10
    ```
-   > **`-q 10` is required**: NIC has 10 combined queues (check with `ethtool -l ens1f1np1`).
-   > Default 20 crashes with `Number of queues is greater than NIC queues (20 > 10)`,
-   > exacerbated by SMT=off halving the reported core count.
-   >
-   > **⚠️ BPF patch required** for large Homa messages: the XDP_EGRESS program drops
-   > non-DATA egress packets (grants, resends) at `micro_kernel/eBPF/homa/main.c:240`.
-   > Apply the patch at `main.c` line 235-248 to move the `c->type != DATA` check
-   > before the `data_header` bounds check, then `make -j$(nproc)` to rebuild.
-   > See Known Limitations #7 for the exact diff.
+    > **`-q 10` is required**: NIC has 10 combined queues (check with `ethtool -l ens1f1np1`).
+    > Default 20 crashes with `Number of queues is greater than NIC queues (20 > 10)`.
 
 2. **App binaries** live in their build subdirectories:
    ```
@@ -61,29 +54,33 @@ against source code in:
 
 5. **Headless execution** — run benchmarks non-interactively via ssh:
 
+   Use `screen -dmS` for micro_kernel and server (they persist across runs).
+   Clients are ephemeral — always wrap in `timeout`.
+
    ```bash
-   # Kill, restart, run pattern (each metric requires fresh micro_kernels):
-   ssh node0 'sudo pkill -9 micro_kernel; sudo pkill -9 cp_node'
-   ssh node1 'sudo pkill -9 micro_kernel'
-
-   ssh node0 'sudo nohup bash -c "cd /local/eTran/eTran/micro_kernel && ./micro_kernel -i ens1f1np1 -q 10" </dev/null >/tmp/micro.log 2>&1 &'
-   ssh node1 'sudo nohup bash -c "cd /local/eTran/eTran/micro_kernel && ./micro_kernel -i ens1f1np1 -q 10" </dev/null >/tmp/micro.log 2>&1 &'
-   sleep 6
-
-   ssh node0 'nohup bash -c "cd /local/eTran/eTran/homa_app && ETRAN_PROTO=homa ./cp_node server ..." </dev/null >/tmp/server.log 2>&1 &'
-   sleep 2
-
-   ssh node1 "cd /local/eTran/eTran/homa_app && timeout 10 env ETRAN_PROTO=homa ./cp_node client ... 2>&1"
-   ```
-   > Use `timeout N env VAR=val` (not `timeout VAR=val`) — `timeout` doesn't parse
-   > environment prefixes, use explicit `env`. `</dev/null` prevents stdin noise
-   > (the micro_kernel monitor thread complains with "Unknown command" otherwise).
-
-6. **Shm cleanup** between metrics — mandatory to avoid stale BPF state:
-   ```bash
+   # Kill everything, clean shm, start micro_kernels, start server, run client:
+   ssh node0 'sudo pkill -9 cp_node; sudo pkill -9 micro_kernel'
+   ssh node1 'sudo pkill -9 cp_node; sudo pkill -9 micro_kernel'
    ssh node0 'sudo rm -f /dev/shm/BufferPool_* /dev/shm/UMEM_* /dev/shm/LRPC_*'
    ssh node1 'sudo rm -f /dev/shm/BufferPool_* /dev/shm/UMEM_* /dev/shm/LRPC_*'
+
+   ssh node0 "sudo screen -dmS micro_kernel bash -c 'cd /local/eTran/eTran/micro_kernel && exec ./micro_kernel -i ens1f1np1 -q 10'"
+   ssh node1 "sudo screen -dmS micro_kernel bash -c 'cd /local/eTran/eTran/micro_kernel && exec ./micro_kernel -i ens1f1np1 -q 10'"
+   sleep 5
+
+   ssh node0 "sudo screen -dmS server bash -c 'cd /local/eTran/eTran/homa_app && exec env ETRAN_PROTO=homa ./cp_node server'"
+   sleep 3
+
+   ssh node1 "timeout 15 env ETRAN_PROTO=homa ./cp_node client ... 2>&1"
    ```
+   > Use `screen -dmS` (not `nohup ... </dev/null`) for background processes —
+   > the micro_kernel monitor thread exits on stdin EOF. `screen` provides
+   > a proper pty. Server stays alive for multiple client runs; only restart
+   > it when switching metrics or after stale state.
+
+6. **Shm cleanup** between metrics — mandatory to avoid stale BPF state.
+   See AGENTS.md "Critical procedure for running benchmarks" for the full
+   kill → clean → screen restart → run sequence.
 
 ---
 
@@ -191,7 +188,8 @@ ETRAN_PROTO=homa ./cp_node server --ports 4
 timeout 30 env ETRAN_PROTO=homa ./cp_node client \
   --first-server 0 \
   --workload 500000 \
-  --client-max 64 \
+  --client-max 1 \
+  --ports 1 \
   --server-ports 4 \
   --one-way
 ```
@@ -207,9 +205,10 @@ Measure server-side Gbps in (output: `Servers: ... Gbps in ...`).
 >
 > **⚠️ 10-core ceiling**: With SMT=off (10 cores), micro_kernel (10 queue threads)
 > + server (4 threads) + 7 clients (1 thread each) = 21 threads competing for 10
-> cores. `--client-max 1` gives the best throughput (12.9 Gbps sustained); higher
-> values degrade performance due to CPU contention. Paper's 23 Gbps required 20
-> cores (2 sockets). Use `--client-max 1` for single-socket setups.
+> cores. `--client-max 1 --ports 1` gives the best throughput (12.9 Gbps sustained);
+> higher concurrency (`--client-max 2`→10.9 Gbps, `--client-max 4`→10.6 Gbps then
+> collapse) degrades due to CPU contention. Paper's 23 Gbps required 20 cores (2
+> sockets). Use `--client-max 1 --ports 1` for single-socket setups.
 
 **Result**: **12.9 Gbps** (56% of target). Effectively half the paper's 23 Gbps,
 matching the 10 vs 20 core ratio. RTT P50 ~2.1ms. `--client-max 2`→10.9 Gbps
@@ -228,7 +227,7 @@ ETRAN_PROTO=homa ./cp_node server
 timeout 30 env ETRAN_PROTO=homa ./cp_node client \
   --first-server 0 \
   --workload 500000 \
-  --client-max 64 \
+  --client-max 1 \
   --ports 7 \
   --server-nodes 7 \
   --one-way
@@ -236,8 +235,8 @@ timeout 30 env ETRAN_PROTO=homa ./cp_node client \
 Measure client-side Gbps out.
 
 > `--ports 7`: 7 sending threads (one per server). `--server-ports 1` is default.
-> `--client-max 1`: 1 outstanding per port, 7 total. `--client-max 64` stalls
-> (9 per port × 1 socket = CPU contention). Use `--client-max 1` for 10-core.
+> `--client-max 1`: 1 outstanding per port, 7 total. Higher concurrency stalls
+> (e.g. `--client-max 64` → 448 concurrent RPCs, CPU contention on 10 cores).
 
 **Result**: **19.5 Gbps** (86% of target). NIC-limited (single 25 Gbps link).
 RTT P50 ~1.37ms. Stable throughput within ±1 Gbps. Each single-threaded server
@@ -256,17 +255,18 @@ ETRAN_PROTO=homa ./cp_node server --ports 7
 timeout 30 env ETRAN_PROTO=homa ./cp_node client \
   --first-server 0 \
   --workload 32 \
-  --client-max 256 \
-  --ports 7 \
+  --client-max 64 \
+  --ports 1 \
   --server-ports 7
 ```
 Output: `Clients: <Kops> Kops/sec` — aggregate across all 7 clients for Mops.
 
 > 32B messages don't trigger the buffer pool crash at `--ports 7` (no grants needed).
-> `--client-max 256`: 256/7 ≈ 36 outstanding per port.
-> **⚠️ 10-core**: Best result was `--ports 1 --client-max 64` per client (962 Kops,
-> 33% of target). Higher --client-max or more client threads reduces throughput
-> due to CPU contention. Full micro_kernel + shm restart required between runs.
+> `--client-max 64 --ports 1`: 64 outstanding per client node, 1 sending thread.
+> **⚠️ 10-core**: `--ports 1 --client-max 64` per client gives the best result
+> (962 Kops, 33% of target). Higher `--client-max` or more client threads reduces
+> throughput due to CPU contention (21+ threads on 10 cores). Full micro_kernel +
+> shm restart required between runs.
 
 **Result**: **962 Kops/sec** (33% of 2.9 Mops target). RTT P50 ~27µs with
 `--ports 1 --client-max 64`. Paper's 20 cores would roughly double this.
@@ -664,39 +664,13 @@ sudo timeout 15 taskset -c 3 ./xdpsock -i ens1f1np1 -q 3 -r -N -z
    TCP against Linux TCP only; TAS comparison requires a separate TAS setup.
 
 7. **Homa large-message grants (metrics #2–4, #7–12, #22)** — The upstream
-   eTran XDP_EGRESS BPF program at `micro_kernel/eBPF/homa/main.c:240` drops
-   grant/resend packets because the `data_header` bounds check runs before the
-   `c->type != DATA` check. All large Homa benchmarks **require** this patch:
-
-   ```diff
-   --- a/micro_kernel/eBPF/homa/main.c
-   +++ b/micro_kernel/eBPF/homa/main.c
-        eth = (struct ethhdr *)data;
-   +    CHECK_AND_DROP_LOG(eth + 1 > data_end, "eth + 1 > data_end");
-        iph = (struct iphdr *)(eth + 1);
-   +    CHECK_AND_DROP_LOG(iph + 1 > data_end, "iph + 1 > data_end");
-        c = (struct common_header *)(iph + 1);
-   -    d = (struct data_header *)c;
-   -
-   -    CHECK_AND_DROP_LOG(d + 1 > data_end, "d + 1 > data_end");
-   +    CHECK_AND_DROP_LOG(c + 1 > data_end, "c + 1 > data_end");
-
-        CHECK_AND_DROP_LOG(iph->protocol != IPPROTO_HOMA, "not HOMA protocol");
-
-        if (unlikely(data_meta->tx.slowpath)) {
-            return xmit_packet(ctx, eth, iph);
-        }
-   -    CHECK_AND_DROP_LOG(c->type != DATA, "not DATA packet");
-   +    if (c->type != DATA) {
-   +        return xmit_packet(ctx, eth, iph);
-   +    }
-   +
-   +    d = (struct data_header *)c;
-   +    CHECK_AND_DROP_LOG(d + 1 > data_end, "d + 1 > data_end");
-   ```
-
-   > **Rebuild after patching**: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
-   > Then restart the micro_kernel on all nodes.
+    eTran XDP_EGRESS BPF program at `micro_kernel/eBPF/homa/main.c:240` drops
+    grant/resend packets because the `data_header` bounds check runs before the
+    `c->type != DATA` check. The patch moves the `c->type != DATA` check before the
+    `data_header` bounds check and routes non-DATA packets through `xmit_packet()`.
+    Apply to `micro_kernel/eBPF/homa/main.c` lines 235-248, then
+    `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)` and restart micro_kernel.
+    Already applied to all nodes.
 
 8. **`--one-way` response size** — `--one-way` caps server responses at **100 bytes**
    (`header->short_response ? 100 : header->length` in cp_node source). The paper
