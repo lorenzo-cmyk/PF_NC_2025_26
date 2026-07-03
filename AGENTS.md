@@ -76,6 +76,15 @@ ssh node0 "sudo screen -S server -X hardcopy /tmp/srv.log; \
 - Start clients sequentially with 0.3s stagger to avoid overwhelming the server
   (especially for multi-client metrics like #3, #5).
 
+### TCP benchmark differences
+The procedure above is for **Homa** metrics (1-6, 22). TCP benchmarks (13-21)
+use different binaries and env vars:
+- **Server**: `epoll_server` (TCP throughput) or `flexkvs_server` (KV) — both in
+  `tcp_app/`. Must set `ETRAN_NR_APP_THREADS=1 ETRAN_NR_NIC_QUEUES=10` via `env`.
+- **Client**: `epoll_client` or `flexkvs_bench` — in `tcp_app/`. Same env vars.
+- **micro_kernel** is still required (libetran.so routes TCP via AF_XDP).
+- Output is hidden over SSH (C stdout buffering) — prefix with `script -q -c`.
+
 ### Controlling screen sessions
 ```bash
 # Check micro_kernel is up
@@ -186,3 +195,10 @@ wait
 - `common/tran_def/homa.h:8` — HOMA_MAX_MESSAGE_LENGTH = 1000000
 - `micro_kernel/micro_kernel.cc:51` — default queues = 20
 - `homa_app/cp_node.cc:1616` — default workload = "100"
+- `tcp_app/epoll_client.cc` — TCP throughput client; `-s` toggles response mode (default short 100B)
+- `tcp_app/epoll_server.cc` — TCP throughput server; `-s` toggles response mode
+- `tcp_app/flexkvs_server.cc` — KV server, 3 positional args (CONFIG THREADS QUEUES), port 11211 hardcoded
+- `tcp_app/flexkvs_bench.cc` — KV benchmark client; `--time`/`--warmup`/`--cooldown` stored but not enforced
+- `lib/socket.cc:405` — TCP "Connection is closed by microkernel" idle-drop message
+- `lib/eTran_common.cc` — `pre_main` constructor reads `ETRAN_PROTO` (required), `ETRAN_NR_APP_THREADS` + `ETRAN_NR_NIC_QUEUES` (required for TCP)
+- `shared_lib/` — `libetran.so` built via `interpose.cc`; LD_PRELOAD intercepts socket/epoll/read/write
