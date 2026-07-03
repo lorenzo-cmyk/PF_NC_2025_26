@@ -84,6 +84,8 @@ use different binaries and env vars:
 - **Client**: `epoll_client` or `flexkvs_bench` — in `tcp_app/`. Same env vars.
 - **micro_kernel** is still required (libetran.so routes TCP via AF_XDP).
 - Output is hidden over SSH (C stdout buffering) — prefix with `script -q -c`.
+- epoll_* `-s` flag: default is `short_response=true` (server replies 100B). `-s`
+  flips to echo the full request back. Counterintuitive — `-s` means "send full".
 
 ### Controlling screen sessions
 ```bash
