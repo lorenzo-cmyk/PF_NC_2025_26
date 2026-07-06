@@ -1,5 +1,5 @@
 ---
-- name: eTran node tuning — boot parameters (SMT, mitigations, C-states, ASPM)
+- name: eTran node tuning — boot parameters (HT on, mitigations, C-states, ASPM)
   hosts: all
   become: true
   tasks:
@@ -9,17 +9,29 @@
       register: grub_current
       changed_when: false
 
-    - name: Add nosmt and mitigations=off if missing
+    - name: Remove nosmt if present (keep mitigations=off)
       ansible.builtin.shell:
         cmd: |
-          if grep -q 'nosmt' /etc/default/grub && grep -q 'mitigations=off' /etc/default/grub; then
-            echo ok
-          else
-            sed -i '/^GRUB_CMDLINE_LINUX=/s/"$/ nosmt mitigations=off"/' /etc/default/grub
+          if grep -q 'nosmt' /etc/default/grub; then
+            sed -i '/^GRUB_CMDLINE_LINUX=/s/ nosmt//g' /etc/default/grub
             echo changed
+          else
+            echo ok
           fi
       register: grub_smt
       changed_when: grub_smt.stdout == 'changed'
+
+    - name: Add mitigations=off if missing
+      ansible.builtin.shell:
+        cmd: |
+          if grep -q 'mitigations=off' /etc/default/grub; then
+            echo ok
+          else
+            sed -i '/^GRUB_CMDLINE_LINUX=/s/"$/ mitigations=off"/' /etc/default/grub
+            echo changed
+          fi
+      register: grub_mitigations
+      changed_when: grub_mitigations.stdout == 'changed'
 
     - name: Add C-state and ASPM tuning if missing
       ansible.builtin.shell:
@@ -36,17 +48,25 @@
     - name: Update GRUB if any params changed
       ansible.builtin.command:
         cmd: update-grub
-      when: grub_smt.changed or grub_cstates.changed
+      when: grub_smt.changed or grub_mitigations.changed or grub_cstates.changed
 
     - name: Reboot if any params changed
       ansible.builtin.reboot:
         reboot_timeout: 600
-      when: grub_smt.changed or grub_cstates.changed
+      when: grub_smt.changed or grub_mitigations.changed or grub_cstates.changed
 
-    - name: Verify SMT disabled
+    - name: Verify SMT enabled (Hyper-Threading on)
       ansible.builtin.shell:
         cmd: cat /sys/devices/system/cpu/smt/control
       register: smt_status
+      changed_when: false
+
+    - name: Verify thread count
+      ansible.builtin.shell:
+        cmd: |
+          echo "threads=$(nproc)"
+          echo "threads_per_core=$(lscpu | awk '/^Thread\(s\) per core:/ {print $4}')"
+      register: thread_count
       changed_when: false
 
     - name: Verify mitigations disabled
@@ -82,6 +102,7 @@
       ansible.builtin.debug:
         msg:
           - "{{ inventory_hostname }}: SMT={{ smt_status.stdout }}"
+          - "{{ inventory_hostname }}: {{ thread_count.stdout_lines | join(', ') }}"
           - "{{ inventory_hostname }}: mitigations={{ mitigations_status.stdout }}"
           - "{{ inventory_hostname }}: C-states={{ cstate_status.stdout }}"
           - "{{ inventory_hostname }}: ASPM={{ aspm_status.stdout }}"
