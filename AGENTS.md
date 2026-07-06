@@ -258,10 +258,10 @@ wait
 ## Hardware
 - CloudLab xl170, 10-core E5-2640v4 × 1 socket, Mellanox ConnectX-4 Lx 25G
 - Paper used the SAME xl170 nodes (single-socket 10-core E5-2640v4, ConnectX-4
-  25G). The paper's §6 phrase "two 10-core Intel E5-2640v4 CPUs" is misleading —
-  the CloudLab xl170 spec lists a single 10-core CPU per node. Confirmed via
-  `lscpu` on node0: `Socket(s): 1, Core(s) per socket: 10`. No core-count
-  excuse for the throughput gap; treat gaps as real bugs to investigate.
+  25G). The paper's §6 phrase "two 10-core Intel E5-2640v4 CPUs" is a
+  typo (per the authors) — the CloudLab xl170 has a single 10-core CPU per
+  node. Confirmed via `lscpu` on node0: `Socket(s): 1, Core(s) per socket: 10`.
+  No core-count excuse for the throughput gap; treat gaps as real bugs to investigate.
 - NIC: `ens1f1np1` (PCI 0000:03:00.1), NUMA node 0
 - SMT=on (HT enabled, removed `nosmt` from GRUB): 20 logical CPUs online
   (cores 0-9 physical, 10-19 HT siblings). NIC has 20 combined queues.
