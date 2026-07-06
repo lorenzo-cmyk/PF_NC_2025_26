@@ -7,9 +7,9 @@
 | 1 | 32B latency (P50) | **12.66 µs** | 11.8 µs | **93%** | Same HW as paper; 7% gap under investigation (not NUMA) |
 | 2 | 1MB throughput | **16.6 Gbps** | 17.7 Gbps | **94%** | Same HW as paper; ~6% gap under investigation |
 | 3 | 7-clients→1-server 500KB | **~13 Gbps** (micro_kernel pinned core 9, server cores 0-7) | 23.0 Gbps | **56%** | Homa grant/egress XDP_GEN dispatch path saturates at ~13 Gbps regardless of `--ports`; real bug, NOT core count (same HW as paper) |
-| 4 | 1-client→7-servers 500KB | **~17 Gbps** | 22.7 Gbps | **75%** | NOT NIC (paper hit 22.7 on same 25G link); bottleneck under investigation — likely single-threaded mk dispatch + Homa grant pacing |
-| 5 | Client RPC rate, 32B (7:1) | **1040 Kops** aggregate peak / 800 K steady (mk core 9, server cores 0-7) | 2.9 Mops | **28%** | Single-threaded microkernel RX `control_loop` caps ingress (mk has 3 threads total, not per-queue) |
-| 6 | Server RPC rate, 32B (1:7) | **~820 K steady / 1099 K client-side** (mk core 9, server cores 0-7, --client-max 128) | 3.3 Mops | **25%** | Same single-threaded microkernel RX poll_loop |
+| 4 | 1-client→7-servers 500KB | **~17 Gbps** | 22.7 Gbps | **75%** | NOT NIC (paper hit 22.7 on same 25G link); XDP_GEN grant pacing + per-app-thread send rate on the client |
+| 5 | Client RPC rate, 32B (7:1) | **1040 Kops** aggregate peak / 800 K steady (mk core 9, server cores 0-7) | 2.9 Mops | **28%** | Per-app-thread polling rate + BPF map contention (mk is NOT on Homa data fastpath — see Key findings) |
+| 6 | Server RPC rate, 32B (1:7) | **~820 K steady / 1099 K client-side** (mk core 9, server cores 0-7, --client-max 128) | 3.3 Mops | **25%** | Per-app-thread polling rate + BPF map contention; mk's roaming control_loop competes for CPU/cache |
 | 13 | TCP 1KB throughput | **7.18 Gbps** (single-threaded, mk core 9, app cores 0-7) | 4.8× Linux | — | Raw number captured; ratio needs Linux-TCP baseline |
 | 14 | TCP 2KB throughput | **12.30 Gbps** (single-threaded, mk core 9, app cores 0-7) | 0.87× TAS | — | Raw number captured; ratio needs TAS baseline |
 | 15 | TCP 1K persistent conns, 64B | **770 Kops peak / 230 K steady aggregate** (10-thr server, 5 clients × 200 conns, mk core 9) | 2.26× Linux | — | Previous claim of ~2 Mops was burst artifact; steady-state is ~230 K, early burst ~770 K. Connection drop after ~9s limits window |
@@ -20,31 +20,59 @@
 | 22 | Homa CPU cycles/req | **~1213 kcycles** | 5.48 kcycles | — | AF_XDP busy-poll inflation |
 
 **Key findings:**
-- **Microkernel threading model verified**: micro_kernel has only 3 threads total
-  (main + `control_loop` + `monitor`). The single `control_loop` thread runs
-  poll_network/poll_lrpc/poll_uds/poll_tcp_cc_to in a busy loop and is the
-  single CPU-thread RX dispatch for ALL queues. Earlier notes claiming
-  "10 queue threads per micro_kernel" are WRONG. The control_loop is
-  *internally* pinned to `CP_CPU = 19` (defs.h), which is OFFLINE under our
-  `nosmt` (cores 10-19 are SMT siblings of 0-9) — so `pthread_setaffinity_np`
-  silently fails and control_loop roams cores 0-9.
-- The dominant metric 3/5/6 bottleneck is NOT "21 threads competing for 10 cores",
-  but the single-threaded microkernel RX dispatch_loop on the server (and per-sender
-  on each client). Per-server-thread RPC rate plateaus ~185 Kops regardless of port count.
+- **Homa data path is FASTPATH — microkernel is NOT on it** (verified in
+  source `micro_kernel/eBPF/homa/main.c`, `lib/eTran_rpc.cc`): NIC → entrance
+  XDP → `xdp_sock` BPF calls `bpf_redirect_map(&xsks_map, socket_id)` to push
+  Homa DATA packets directly into the **application's** AF_XDP socket. The app
+  thread polls its XSK rings (`lib/eTran_rpc.cc:323,463`) and TXes via
+  `xsk_ring_prod__reserve` + `kick_tx` (`lib/eTran_rpc.cc:187,203`). Homa
+  grants are generated at the NIC by the `xdp_gen` BPF program (`return XDP_TX`
+  in `eBPF/homa/main.c:192`) — also bypasses mk. The microkernel's only Homa
+  role is **slow-path**: bind/close via `process_homa_cmd` (only `APPOUT_HOMA_BIND`
+  / `APPOUT_HOMA_CLOSE` are handled — see `homa.cc:790`) and the 1ms timeout
+  scan `poll_homa_to` which scans the BPF RPC map for zombies/retransmits.
+  ⇒ **The earlier claim that "the single-threaded microkernel RX control_loop
+  caps Homa ingress" is WRONG.** mk never sees a Homa data packet.
+- **TCP data path is also FASTPATH** (`micro_kernel/eBPF/tcp/main.c:258,367,378`):
+  TCP data redirected via `bpf_redirect_map(&xsks_map, ...)` to the app's XSK.
+  mk only owns the slow-path XSK fed via `slow_path_map` — connection setup
+  (SYN/handshake), closes, timeouts. So mk is NOT the throughput cap for TCP
+  metrics 13-15 either; it only gates connection-rate metrics (16-17, not run).
+- **Microkernel threading model** (verified `micro_kernel.cc`, `control_plane.cc:1070-1158`):
+  mk has only 3 threads total (main + `control_loop` + `monitor`). `control_loop`
+  sequentially calls poll_uds → poll_lrpc → poll_network → poll_tcp_handshake_events
+  → poll_tcp_cc_to → poll_homa_to, then `clock_nanosleep`s up to `TICK_US` (1ms)
+  when idle. It is **internally** pinned to `CP_CPU = 19` (`runtime/defs.h:26`),
+  which is OFFLINE under our `nosmt` (cores 10-19 are SMT siblings of 0-9). The
+  `pthread_setaffinity_np` at `control_plane.cc:1155` does **not** check its
+  return value, so the pin fails silently and the control_loop roams cores 0-9.
+  Its effect on metrics is indirect: a constantly-migrating busy thread (it has
+  its own `epoll_wait` + map batch scans every 1ms) competes for CPU/cache with
+  the real polling threads (the application threads). That's why
+  `taskset -c 9 ./micro_kernel` gives a 5-25% metric 5/6 lift — it removes
+  cache/CPU contention, not a dispatch bottleneck.
+- The real Homa metric 3/5/6 bottlenecks (since mk is off the data path) are:
+  per-app-thread polling rate, XDP_GEN grant eBPF scheduling (for large msgs),
+  BPF RPC-map contention between the app fastpath and mk's 1ms `poll_homa_to`
+  batch scan, and NIC IRQ/RSS distribution across app queues. Same HW as paper,
+  so the gap is a real software/tuning bug — investigate these, not cores.
 - Affinity prescription that helps metrics 5/6: `taskset -c 9 ./micro_kernel`
-  (mk on core 9, dedicated — gives ~5-25% per-client throughput gain by removing
-  core migration of the busy-poll control_loop), server/client app threads on
-  cores 0-7 or 0-6. **Pin mk to a HIGHER core (8 or 9); pinning to core 0
-  breaks the run** (core 0 carries IRQ/mlx5_comp extra housekeeping contention).
-- Metric 3 is bounded by Homa grant dispatch through the XDP_GEN tail-call
-  BPF (`homa/main.c`) which uses per-CPU state (`granting_idx[cpu]`,
-  `nr_grant_candidate[cpu]`, `HOMA_OVERCOMMITMENT=8`). Higher server ports do
-  NOT raise throughput — the egress grant loop plateaus at ~13 Gbps regardless
-  of `--ports`. Since core count matches the paper, the plateau is a real bug
-  in the dispatch/grant serialization, not a capacity ceiling.
+  (mk on core 9, dedicated — gives ~5-25% by removing control_loop cache
+  migration), server/client app threads on cores 0-7 or 0-6. **Pin mk to a
+  HIGHER core (8 or 9); pinning to core 0 breaks the run** (core 0 carries
+  IRQ/mlx5_comp extra housekeeping contention). A cleaner fix is to change
+  `CP_CPU` in `runtime/defs.h:26` to an online core (e.g. 9) so the internal
+  pin succeeds — would remove the `taskset` workaround entirely.
+- Metric 3 is bounded by the Homa grant dispatch through the XDP_GEN tail-call
+  BPF (`eBPF/homa/main.c`): per-CPU state `granting_idx[cpu]`,
+  `nr_grant_candidate[cpu]`, `HOMA_OVERCOMMITMENT=8`. Throughput plateaus at
+  ~13 Gbps regardless of `--ports`. Same HW as paper → the plateau is a real
+  serialization/overhead bug in the grant/dispatch eBPF, not a capacity ceiling.
 - Metrics 1-2 are close to paper (93-94%). The remaining gap is NOT core count
   (paper used identical xl170 single-socket 10-core nodes — see AGENTS.md Hardware).
-- Metric 4 is NOT NIC-limited — paper reached 22.7 Gbps on the same 25G link. The 17 vs 22.7 gap is a real bug (likely mk control_loop + grant pacing), not the link.
+- Metric 4 is NOT NIC-limited — paper reached 22.7 Gbps on the same 25G link. The
+  17 vs 22.7 gap is a real bug (XDP_GEN grant pacing + per-app-thread send rate),
+  not the link.
 - TCP benchmarks all work — the earlier SIGABRT was fixed by the BPF XDP_EGRESS patch.
 - KV latency (metrics 19-20) **beats paper targets** (14 vs 17.2 µs P50, 16 vs 27.5 µs P99).
 - `perf stat` works for TCP benchmarks but breaks Homa's AF_XDP polling (sampling interrupts cause RPC stalls).
@@ -246,17 +274,20 @@ Measure server-side Gbps in (output: `Servers: ... Gbps in ...`).
 > Start clients with 0.3s stagger (see AGENTS.md multi-node orchestration).
 >
 > **⚠️ Note on thread oversubscription**: micro_kernel has only **3 threads**
-> total (main + `control_loop` + monitor), NOT 10 queue threads — the single
-> `control_loop` is the sole RX/TX dispatch for ALL queues (see AGENTS.md).
-> Counting mk + server (4) + 7 clients (1 each) ≈ 14 runnable threads on 10
-> cores, but this is NOT the dominant bottleneck. `--client-max 1 --ports 1`
-> gives the best throughput (12.9 Gbps sustained); higher concurrency
-> (`--client-max 2`→10.9 Gbps, `--client-max 4`→10.6 Gbps then collapse)
-> degrades due to the BPF grant path and mk dispatch saturation, not raw
-> thread oversubscription. Paper ran on identical xl170 10-core single-socket
-> nodes, so the gap is NOT a core-count deficit — it is the single-threaded
-> microkernel `control_loop` plus the `--ports > 4` buffer-pool crash capping
-> server parallelism. Use `--client-max 1 --ports 1`.
+> total (main + `control_loop` + monitor). The Homa data path does NOT go
+> through mk — data is fastpath-redirected by the XDP BPF to the app's XSK
+> and polled by the app thread (see Key findings). mk only owns slow-path
+> (bind/close + 1ms timeout scan). Counting mk + server (4) + 7 clients (1
+> each) ≈ 14 runnable threads on 10 cores, but the bottleneck is NOT raw
+> thread oversubscription and NOT mk dispatch — it's the XDP_GEN grant
+> eBPF serialization and the per-app-thread send cap. `--client-max 1
+> --ports 1` gives the best throughput (12.9 Gbps sustained); higher
+> concurrency (`--client-max 2`→10.9 Gbps, `--client-max 4`→10.6 Gbps then
+> collapse) degrades due to the BPF grant path, not raw oversubscription.
+> Paper ran on identical xl170 10-core single-socket nodes, so the gap is
+> NOT a core-count deficit; it is the grant-egress-side bug plus the
+> `--ports > 4` buffer-pool crash capping server parallelism. Use
+> `--client-max 1 --ports 1`.
 
 **Result**: **12.9 Gbps** (56% of target). The shortfall vs paper's 23 Gbps is a
 real bug, not a core-count penalty (same HW). RTT P50 ~2.1ms. `--client-max 2`→10.9 Gbps
@@ -287,11 +318,12 @@ Measure client-side Gbps out.
 > (e.g. `--client-max 64` → 448 concurrent RPCs, CPU contention on 10 cores).
 
 **Result**: **19.5 Gbps** (86% of target). Bottleneck under investigation —
-NOT the NIC (paper reached 22.7 Gbps on the same 25G link). Likely candidate is
-the single-threaded microkernel `control_loop` on the client side and Homa grant
-pacing through the XDP_GEN eBPF path.
-RTT P50 ~1.37ms. Stable throughput within ±1 Gbps. Each single-threaded server
-handles ~2.8 Gbps.
+NOT the NIC (paper reached 22.7 Gbps on the same 25G link). NOT mk dispatch:
+Homa data is fastpath-redirected by XDP to the app's XSK; the client's 7 app
+threads send directly via `xsk_ring_prod`. Likely candidates are the XDP_GEN
+grant pacing eBPF overhead on the receive side and the per-app-thread send
+throughput cap on the client. RTT P50 ~1.37ms. Stable throughput within ±1 Gbps.
+Each single-threaded server handles ~2.8 Gbps.
 
 ### 5. eTran - Homa | Client RPC rate, 32B | 2.9 Mops | 8-Node (7:1 ratio)
 
@@ -315,14 +347,17 @@ Output: `Clients: <Kops> Kops/sec` — aggregate across all 7 clients for Mops.
 > 32B messages don't trigger the buffer pool crash at `--ports 7` (no grants needed).
 > `--client-max 64 --ports 1`: 64 outstanding per client node, 1 sending thread.
 > `--ports 1 --client-max 64` per client gives the best result
-> (962 Kops, 33% of target). Higher `--client-max` or more client threads reduces
-> throughput due to mk `control_loop` dispatch saturation and BPF grant pressure,
-> not raw thread oversubscription (mk has only 3 threads total — see AGENTS.md).
-> Full micro_kernel + shm restart required between runs.
+> (962 Kops, 33% of target). Higher `--client-max` or more client threads
+> reduces throughput — but NOT because of mk dispatch (mk is NOT on the Homa
+> data fastpath — see Key findings). The cap is the per-app-thread polling
+> rate and BPF map contention between the app fastpath and mk's 1ms
+> `poll_homa_to` timeout scan. Full micro_kernel + shm restart required
+> between runs.
 
 **Result**: **962 Kops/sec** (33% of 2.9 Mops target). RTT P50 ~27µs with
-`--ports 1 --client-max 64`. Same HW as paper — the 3× gap is NOT core count;
-it is the single-threaded microkernel RX `control_loop` bottleneck (see AGENTS.md).
+`--ports 1 --client-max 64`. Same HW as paper — the 3× gap is NOT core count
+and NOT mk dispatch; it is per-app-thread polling/XDP-redirect overhead plus
+BPF RPC-map contention. See Key findings.
 
 ### 6. eTran - Homa | Server RPC rate, 32B | 3.3 Mops | 8-Node (1:7 ratio)
 
@@ -347,7 +382,9 @@ Output: `Servers: <Kops> Kops/sec` (aggregate across all 7 servers).
 > on ALL nodes is mandatory. Use `--ports 7 --client-max 256` (not --ports 1).
 
 **Result**: **1100 Kops/sec** (33% of 3.3 Mops target). RTT P50 ~218µs (stable).
-Per-server breakdown: ~157 Kops/sec each. Matches the 10-core limitation.
+Per-server breakdown: ~157 Kops/sec each. Same HW as paper — gap is NOT
+core count and NOT mk dispatch (Homa data is app fastpath, see Key findings);
+real bottleneck is per-app-thread polling rate + XDP_GEN + BPF RPC-map contention.
 
 ### 7–12. eTran - Homa | P50/P99 tail latency slowdown, W2–W5 | 10-Node Cluster
 

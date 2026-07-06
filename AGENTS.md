@@ -159,8 +159,9 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
   regardless of queue count or IRQ pinning. Paper also notes SMT degrades AF_XDP.
   SMT=off (via `nosmt` in GRUB) is mandatory.
 - `perf` breaks Homa AF_XDP but works fine for TCP benchmarks (Metric 21 completed
-  with 50.7B cycles under perf). The microkernel's polling on separate threads is
-  not disrupted by perf on the application thread.
+  with 50.7B cycles under perf). The application thread's own AF_XDP busy-poll
+  is what `perf` sampling interrupts stall; mk's slow-path control_loop is
+  unaffected and is not the relevant target of perf interference.
 - TCP connection drop after ~9s: "Connection is closed by microkernel" from
   `lib/socket.cc:405`. The microkernel closes TCP state after idle. Benchmark
   produces valid data before the drop. Use `timeout 15` for clean runs.
@@ -169,19 +170,39 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
 - All-to-all `--both` segfaults on exit (shared memory cleanup race)
 - Throughput gap vs paper (metrics 3/5/6 at 25-56%) is NOT a core-count
   deficit — paper used identical CloudLab xl170 single-socket 10-core nodes.
-  The real bottlenecks are the single-threaded microkernel `control_loop`
-  (the only RX/TX dispatch thread for ALL queues), the `CP_CPU=19` silent
-  pin failure under `nosmt`, and the `--ports > 4` buffer-pool slab crash.
+  And it is NOT a microkernel dispatch bottleneck: **the Homa data path is
+  fastpath** — the `xdp_sock` BPF calls `bpf_redirect_map(&xsks_map, ...)` to
+  push DATA packets directly into the application's AF_XDP socket
+  (`micro_kernel/eBPF/homa/main.c`), and the app thread polls its XSK rings +
+  TXes via `kick_tx` (`lib/eTran_rpc.cc`). Homa grants are generated at the NIC
+  by the `xdp_gen` BPF (`XDP_TX` in `eBPF/homa/main.c:192`). The microkernel
+  handles only slow-path: Homa bind/close (`process_homa_cmd` in `homa.cc:790`
+  handles ONLY `APPOUT_HOMA_BIND`/`APPOUT_HOMA_CLOSE`) and the 1ms timeout
+  scan `poll_homa_to`. TCP data is also fastpath-via-XSKMAP
+  (`eBPF/tcp/main.c:258,367,378`); mk only owns TCP handshake/control.
+  Real Homa bottlenecks to investigate: XDP_GEN grant eBPF serialization,
+  per-app-thread polling rate, BPF RPC-map contention between the app
+  fastpath and mk's 1ms `poll_homa_to` batch scan, NIC IRQ/RSS distribution.
+  Plus the `CP_CPU=19` silent pin failure (mk control_loop roams, costs cache)
+  and the `--ports > 4` buffer-pool slab crash that caps server parallelism.
 - flexkvs_server hardcodes port 11211; flexkvs_bench `--time`/`--warmup`/`--cooldown`
   are stored but never enforced — always wrap in `timeout`.
 - **Micro_kernel threading model**: `ps -L` shows only 3 mk threads (main,
   `control_loop` pinned to `CP_CPU=19` per `micro_kernel/runtime/defs.h`,
-  `monitor`). The single `control_loop` busy-polls poll_network/poll_lrpc over
-  ALL queues — there are NOT `-q`-many mk threads. With `nosmt`, cores 10-19
-  are offline SMT siblings of 0-9, so mk's internal pin to CP_CPU=19 silently
-  fails and the control_loop is left unconstrained (migrates across 0-9).
-  Pinning mk via `taskset -c 9` externally restores dedicated-core polling and
-  improves mid-size-RPC throughput (metrics 5/6) by 5-25%.
+  `monitor`). With `nosmt`, cores 10-19 are offline SMT siblings of 0-9, so
+  mk's internal pin to CP_CPU=19 silently fails (the `pthread_setaffinity_np`
+  return value is NOT checked — `control_plane.cc:1155`) and the control_loop
+  is left unconstrained (migrates across 0-9). The control_loop sequentially
+  calls poll_uds → poll_lrpc → poll_network → poll_tcp_handshake_events →
+  poll_tcp_cc_to → poll_homa_to then `clock_nanosleep`s up to TICK_US (1ms).
+  These poll_* functions are SLOW-PATH ONLY — mk never touches Homa data
+  packets and never redirects TCP data either (data is XSKMAP-redirected by
+  the eBPF to the app). Pinning mk via `taskset -c 9` externally restores a
+  dedicated core for the slow-path thread (removing roaming-induced
+  CPU/cache contention with the real polling threads) and improves mid-size-
+  RPC throughput (metrics 5/6) by 5-25%. A cleaner fix is to set `CP_CPU`
+  in `runtime/defs.h:26` to an online core (e.g. 9) so the internal pin
+  actually succeeds.
 - **Stale XDP program after kill -9**: if micro_kernel is SIGKILLed in D-state
   (stuck on bpf_map_update_elem), the eTran BPF XDP program remains attached to
   the NIC (`ip link show ens1f1np1 | grep xdp` displays `prog/xdp id NNN`).
