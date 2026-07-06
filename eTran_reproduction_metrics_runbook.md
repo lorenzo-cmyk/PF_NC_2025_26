@@ -4,11 +4,11 @@
 
 | # | Metric | Our Result | Paper Target | % | Bottleneck |
 |---|--------|-----------|-------------|---|-----------|
-| 1 | 32B latency (P50) | **12.66 µs** | 11.8 µs | **93%** | NUMA (1 vs 2 sockets) |
-| 2 | 1MB throughput | **16.6 Gbps** | 17.7 Gbps | **94%** | NIC/CPU |
-| 3 | 7-clients→1-server 500KB | **~13 Gbps** (micro_kernel pinned core 9, server cores 0-7) | 23.0 Gbps | **56%** | Homa grant/egress XDP_GEN dispatch (per-CPU eBPF state), not thread oversubscription |
-| 4 | 1-client→7-servers 500KB | **~17 Gbps** | 22.7 Gbps | **75%** | NIC (single 25 Gbps link) + Homa grant pacing |
-| 5 | Client RPC rate, 32B (7:1) | **1040 Kops** aggregate peak / 800 K steady (mk core 9, server cores 0-7) | 2.9 Mops | **28%** | Single-threaded microkernel RX poll_loop caps per-node ingress; CPU contention |
+| 1 | 32B latency (P50) | **12.66 µs** | 11.8 µs | **93%** | Same HW as paper; 7% gap under investigation (not NUMA) |
+| 2 | 1MB throughput | **16.6 Gbps** | 17.7 Gbps | **94%** | Same HW as paper; ~6% gap under investigation |
+| 3 | 7-clients→1-server 500KB | **~13 Gbps** (micro_kernel pinned core 9, server cores 0-7) | 23.0 Gbps | **56%** | Homa grant/egress XDP_GEN dispatch path saturates at ~13 Gbps regardless of `--ports`; real bug, NOT core count (same HW as paper) |
+| 4 | 1-client→7-servers 500KB | **~17 Gbps** | 22.7 Gbps | **75%** | NOT NIC (paper hit 22.7 on same 25G link); bottleneck under investigation — likely single-threaded mk dispatch + Homa grant pacing |
+| 5 | Client RPC rate, 32B (7:1) | **1040 Kops** aggregate peak / 800 K steady (mk core 9, server cores 0-7) | 2.9 Mops | **28%** | Single-threaded microkernel RX `control_loop` caps ingress (mk has 3 threads total, not per-queue) |
 | 6 | Server RPC rate, 32B (1:7) | **~820 K steady / 1099 K client-side** (mk core 9, server cores 0-7, --client-max 128) | 3.3 Mops | **25%** | Same single-threaded microkernel RX poll_loop |
 | 13 | TCP 1KB throughput | **7.18 Gbps** (single-threaded, mk core 9, app cores 0-7) | 4.8× Linux | — | Raw number captured; ratio needs Linux-TCP baseline |
 | 14 | TCP 2KB throughput | **12.30 Gbps** (single-threaded, mk core 9, app cores 0-7) | 0.87× TAS | — | Raw number captured; ratio needs TAS baseline |
@@ -39,10 +39,12 @@
 - Metric 3 is bounded by Homa grant dispatch through the XDP_GEN tail-call
   BPF (`homa/main.c`) which uses per-CPU state (`granting_idx[cpu]`,
   `nr_grant_candidate[cpu]`, `HOMA_OVERCOMMITMENT=8`). Higher server ports do
-  NOT raise throughput because the egress grant loop scales with CPU count
-  and our 10-core eTran box has half the grant dispatch capacity of paper's 20 cores.
-- Metrics 1-2 are close to paper (93-94%), limited by single-socket NUMA.
-- Metric 4 is single-NIC-limited (25 Gbps link, ~17-19.5 Gbps reachable).
+  NOT raise throughput — the egress grant loop plateaus at ~13 Gbps regardless
+  of `--ports`. Since core count matches the paper, the plateau is a real bug
+  in the dispatch/grant serialization, not a capacity ceiling.
+- Metrics 1-2 are close to paper (93-94%). The remaining gap is NOT core count
+  (paper used identical xl170 single-socket 10-core nodes — see AGENTS.md Hardware).
+- Metric 4 is NOT NIC-limited — paper reached 22.7 Gbps on the same 25G link. The 17 vs 22.7 gap is a real bug (likely mk control_loop + grant pacing), not the link.
 - TCP benchmarks all work — the earlier SIGABRT was fixed by the BPF XDP_EGRESS patch.
 - KV latency (metrics 19-20) **beats paper targets** (14 vs 17.2 µs P50, 16 vs 27.5 µs P99).
 - `perf stat` works for TCP benchmarks but breaks Homa's AF_XDP polling (sampling interrupts cause RPC stalls).
@@ -182,7 +184,8 @@ Output every 1s: `Clients: <Kops> Kops/sec, <gbps> Gbps out, ..., RTT (us) P50 <
 Read P50 for the metric.
 
 **Result**: P50 **12.66 µs** (93% of target). P99 14.90 µs. Stable across 10+ measurements.
-Single-socket NUMA accounts for the 7% gap vs paper's dual-socket setup.
+Small vs paper; cause under investigation (NOT a NUMA/socket gap — paper used
+identical xl170 10-core single-socket hardware).
 
 ### 2. eTran - Homa | Throughput, 1MB requests, back-to-back | 17.7 Gbps | 2-Node
 
@@ -242,15 +245,21 @@ Measure server-side Gbps in (output: `Servers: ... Gbps in ...`).
 >
 > Start clients with 0.3s stagger (see AGENTS.md multi-node orchestration).
 >
-> **⚠️ 10-core ceiling**: With SMT=off (10 cores), micro_kernel (10 queue threads)
-> + server (4 threads) + 7 clients (1 thread each) = 21 threads competing for 10
-> cores. `--client-max 1 --ports 1` gives the best throughput (12.9 Gbps sustained);
-> higher concurrency (`--client-max 2`→10.9 Gbps, `--client-max 4`→10.6 Gbps then
-> collapse) degrades due to CPU contention. Paper's 23 Gbps required 20 cores (2
-> sockets). Use `--client-max 1 --ports 1` for single-socket setups.
+> **⚠️ Note on thread oversubscription**: micro_kernel has only **3 threads**
+> total (main + `control_loop` + monitor), NOT 10 queue threads — the single
+> `control_loop` is the sole RX/TX dispatch for ALL queues (see AGENTS.md).
+> Counting mk + server (4) + 7 clients (1 each) ≈ 14 runnable threads on 10
+> cores, but this is NOT the dominant bottleneck. `--client-max 1 --ports 1`
+> gives the best throughput (12.9 Gbps sustained); higher concurrency
+> (`--client-max 2`→10.9 Gbps, `--client-max 4`→10.6 Gbps then collapse)
+> degrades due to the BPF grant path and mk dispatch saturation, not raw
+> thread oversubscription. Paper ran on identical xl170 10-core single-socket
+> nodes, so the gap is NOT a core-count deficit — it is the single-threaded
+> microkernel `control_loop` plus the `--ports > 4` buffer-pool crash capping
+> server parallelism. Use `--client-max 1 --ports 1`.
 
-**Result**: **12.9 Gbps** (56% of target). Effectively half the paper's 23 Gbps,
-matching the 10 vs 20 core ratio. RTT P50 ~2.1ms. `--client-max 2`→10.9 Gbps
+**Result**: **12.9 Gbps** (56% of target). The shortfall vs paper's 23 Gbps is a
+real bug, not a core-count penalty (same HW). RTT P50 ~2.1ms. `--client-max 2`→10.9 Gbps
 (worse), `--client-max 4`→10.6 Gbps then collapse, `--client-max 64`→10.57 Gbps
 burst then stall (BPF grant overwhelmed at 448 concurrent RPCs).
 
@@ -277,7 +286,10 @@ Measure client-side Gbps out.
 > `--client-max 1`: 1 outstanding per port, 7 total. Higher concurrency stalls
 > (e.g. `--client-max 64` → 448 concurrent RPCs, CPU contention on 10 cores).
 
-**Result**: **19.5 Gbps** (86% of target). NIC-limited (single 25 Gbps link).
+**Result**: **19.5 Gbps** (86% of target). Bottleneck under investigation —
+NOT the NIC (paper reached 22.7 Gbps on the same 25G link). Likely candidate is
+the single-threaded microkernel `control_loop` on the client side and Homa grant
+pacing through the XDP_GEN eBPF path.
 RTT P50 ~1.37ms. Stable throughput within ±1 Gbps. Each single-threaded server
 handles ~2.8 Gbps.
 
@@ -302,13 +314,15 @@ Output: `Clients: <Kops> Kops/sec` — aggregate across all 7 clients for Mops.
 
 > 32B messages don't trigger the buffer pool crash at `--ports 7` (no grants needed).
 > `--client-max 64 --ports 1`: 64 outstanding per client node, 1 sending thread.
-> **⚠️ 10-core**: `--ports 1 --client-max 64` per client gives the best result
+> `--ports 1 --client-max 64` per client gives the best result
 > (962 Kops, 33% of target). Higher `--client-max` or more client threads reduces
-> throughput due to CPU contention (21+ threads on 10 cores). Full micro_kernel +
-> shm restart required between runs.
+> throughput due to mk `control_loop` dispatch saturation and BPF grant pressure,
+> not raw thread oversubscription (mk has only 3 threads total — see AGENTS.md).
+> Full micro_kernel + shm restart required between runs.
 
 **Result**: **962 Kops/sec** (33% of 2.9 Mops target). RTT P50 ~27µs with
-`--ports 1 --client-max 64`. Paper's 20 cores would roughly double this.
+`--ports 1 --client-max 64`. Same HW as paper — the 3× gap is NOT core count;
+it is the single-threaded microkernel RX `control_loop` bottleneck (see AGENTS.md).
 
 ### 6. eTran - Homa | Server RPC rate, 32B | 3.3 Mops | 8-Node (1:7 ratio)
 

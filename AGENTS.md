@@ -167,7 +167,11 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
 - epoll_* and flexkvs output is hidden over SSH (C stdout buffering). Use
   `script -q -c 'command' /dev/null` to force line-buffered output.
 - All-to-all `--both` segfaults on exit (shared memory cleanup race)
-- 10-core SMT=off limits throughput to ~50-60% of paper (paper had 20 cores)
+- Throughput gap vs paper (metrics 3/5/6 at 25-56%) is NOT a core-count
+  deficit — paper used identical CloudLab xl170 single-socket 10-core nodes.
+  The real bottlenecks are the single-threaded microkernel `control_loop`
+  (the only RX/TX dispatch thread for ALL queues), the `CP_CPU=19` silent
+  pin failure under `nosmt`, and the `--ports > 4` buffer-pool slab crash.
 - flexkvs_server hardcodes port 11211; flexkvs_bench `--time`/`--warmup`/`--cooldown`
   are stored but never enforced — always wrap in `timeout`.
 - **Micro_kernel threading model**: `ps -L` shows only 3 mk threads (main,
@@ -219,7 +223,11 @@ wait
 
 ## Hardware
 - CloudLab xl170, 10-core E5-2640v4 × 1 socket, Mellanox ConnectX-4 Lx 25G
-- Paper used 2 sockets (20 cores) + ConnectX-4 25G on same node type
+- Paper used the SAME xl170 nodes (single-socket 10-core E5-2640v4, ConnectX-4
+  25G). The paper's §6 phrase "two 10-core Intel E5-2640v4 CPUs" is misleading —
+  the CloudLab xl170 spec lists a single 10-core CPU per node. Confirmed via
+  `lscpu` on node0: `Socket(s): 1, Core(s) per socket: 10`. No core-count
+  excuse for the throughput gap; treat gaps as real bugs to investigate.
 - NIC: `ens1f1np1` (PCI 0000:03:00.1), NUMA node 0
 - Second mlx5 device at PCI 0000:07:00.0 (unused, but its IRQs appear in
   `/proc/interrupts` and confuse `grep mlx5_comp`)
