@@ -1,0 +1,20 @@
+---
+- name: Homa node setup — install and compile Homa
+  hosts: node0
+  vars:
+    homa_num_nodes: "{{ groups['all'] | length }}"
+    homa_first_node: 0
+  tasks:
+    - name: Build the Homa kernel module and utilities
+      ansible.builtin.shell:
+        cmd: make all && make -C util
+        chdir: /local/HomaModule
+      become: true
+      become_user: "{{ ansible_user }}"
+
+    - name: Run cloudlab/bin/install_homa
+      ansible.builtin.command:
+        cmd: "./cloudlab/bin/install_homa {{ homa_num_nodes }} {{ homa_first_node }}"
+        chdir: /local/HomaModule
+      become: true
+      become_user: "{{ ansible_user }}"

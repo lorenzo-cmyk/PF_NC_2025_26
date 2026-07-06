@@ -1,0 +1,63 @@
+---
+- name: eTran node tuning — verify all + post-tuning benchmark
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Check SMT enabled (Hyper-Threading on)
+      ansible.builtin.shell:
+        cmd: |
+          echo "smt_control=$(cat /sys/devices/system/cpu/smt/control)"
+          echo "nosmt_grub=$(grep -q 'nosmt' /etc/default/grub && echo PRESENT-REMOVE || echo ok-absent)"
+          echo "threads=$(nproc)"
+          echo "threads_per_core=$(lscpu | awk '/^Thread\(s\) per core:/ {print $4}')"
+      register: smt
+      changed_when: false
+
+    - name: Check C-states and ASPM
+      ansible.builtin.shell:
+        cmd: |
+          echo "cstates=$(grep -q 'intel_idle.max_cstate=0' /proc/cmdline && echo disabled || echo ENABLED)"
+          echo "aspm=$(grep -q 'pcie_aspm=off' /proc/cmdline && echo disabled || echo "$(cat /sys/module/pcie_aspm/parameters/policy 2>/dev/null || echo unknown)")"
+          echo "cpuidle_states=$(ls /sys/devices/system/cpu/cpu0/cpuidle/ 2>/dev/null | grep -c state || echo 0)"
+      register: cstates
+      changed_when: false
+
+    - name: Check tuned installed and active
+      ansible.builtin.shell:
+        cmd: |
+          echo "tuned_pkg=$(dpkg -l tuned 2>/dev/null | grep -q '^ii' && echo OK || echo MISSING)"
+          echo "tuned_svc=$(systemctl is-active tuned 2>/dev/null || echo MISSING)"
+          echo "tuned_profile=$(tuned-adm active 2>/dev/null || echo MISSING)"
+      register: tuned
+      changed_when: false
+
+    - name: Check sysbench installed
+      ansible.builtin.shell:
+        cmd: |
+          echo "sysbench=$(dpkg -l sysbench 2>/dev/null | grep -q '^ii' && echo OK || echo MISSING)"
+      register: sysbench
+      changed_when: false
+
+    - name: Run single-threaded CPU benchmark (post-tuning)
+      ansible.builtin.command:
+        cmd: sysbench cpu run
+      register: sysbench_st_post
+      changed_when: false
+
+    - name: Run multi-threaded CPU benchmark (post-tuning)
+      ansible.builtin.shell:
+        cmd: sysbench --threads=$(nproc) cpu run
+      register: sysbench_mt_post
+      changed_when: false
+
+    - name: Verification results
+      ansible.builtin.debug:
+        msg:
+          - "=== {{ inventory_hostname }} VERIFICATION ==="
+          - "{{ smt.stdout_lines }}"
+          - "{{ cstates.stdout_lines }}"
+          - "{{ tuned.stdout_lines }}"
+          - "{{ sysbench.stdout_lines }}"
+          - "=== POST-TUNING BENCHMARK ==="
+          - "{{ sysbench_st_post.stdout_lines }}"
+          - "{{ sysbench_mt_post.stdout_lines }}"

@@ -1,0 +1,24 @@
+---
+- name: HOME node setup — clone source repositories
+  hosts: all
+  tasks:
+
+    - name: Create /local owned by the ansible user
+      become: true
+      ansible.builtin.file:
+        path: /local
+        state: directory
+        owner: "{{ ansible_user }}"
+        mode: "0755"
+
+
+
+    - name: Clone HomaModule (latest master, tracks whatever kernel Ubuntu 24.04 ships)
+      ansible.builtin.git:
+        repo: https://github.com/PlatformLab/HomaModule
+        dest: /local/HomaModule
+        version: master
+      become: true
+      become_user: "{{ ansible_user }}"
+
+

@@ -1,3 +1,5 @@
 Ansible/.venv
 *.pdf
 *:Zone.Identifier
+Ansible/playbooks/.DS_Store
+Ansible/.DS_Store
