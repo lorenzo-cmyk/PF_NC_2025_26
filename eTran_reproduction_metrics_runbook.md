@@ -745,19 +745,64 @@ sudo timeout 15 taskset -c 3 ./xdpsock -i ens1f1np1 -q 3 -r -N -z
 
 ## Quick-Reference: Key Source Code in eTran repo
 
-| File                                    | Key Locations                                                           |
-|:----------------------------------------|:------------------------------------------------------------------------|
-| `eTran/homa_app/cp_node.cc`             | L48 `IF_NAME`, L1528 `client_stats` (Kops/Gbps/RTT P50-P99.9), L1457 `server_stats`, L1603 `client_cmd` defaults reset, L1929 `server_cmd` |
-| `eTran/homa_app/dist.cc`                | `w1`-`w5` distribution arrays, `dist_lookup()` handles int→fixed-size or wN name |
-| `eTran/tcp_app/epoll_client.cc`         | `parse_args`: `-b`(msg size) `-i` `-f`(flows) `-t`(threads) `-o`(outstanding) `-w`(wait) `-l`(max_buf_size) `-s`(response toggle) |
-| `eTran/tcp_app/epoll_server.cc`         | `parse_args`: `-b` `-i` `-t` `-l` `-s`; runs `while(1)`, no loop count |
-| `eTran/tcp_app/flexkvs_bench.cc`        | Uses `flexkvs/commandline.c` `parse_settings()`; `--time`/`--warmup`/`--cooldown` stored but NOT enforced |
-| `eTran/tcp_app/flexkvs_server.cc`       | 3 positional args: `CONFIG THREADS QUEUES`; port hardcoded to 11211 |
-| `eTran/tcp_app/lat_client.cc`           | 500K ping-pongs, sorted P50/P99/P99.9 output; `-c` flag broken (fallthrough bug) |
-| `eTran/micro_kernel/micro_kernel.cc`    | L51 `opt_num_queues=20` default, L106-121 `-q` flag, `-i` iface, `-b` busy-poll |
-| `eTran/lib/eTran_common.cc`             | `__attribute__((constructor)) pre_main` — reads `ETRAN_PROTO` (required), `ETRAN_NR_APP_THREADS` + `ETRAN_NR_NIC_QUEUES` (required for TCP only) |
-| `eTran/shared_lib/`                     | Builds `libetran.so` via `interpose.cc` — LD_PRELOAD intercepts `socket`/`epoll_wait`/`read`/`write` |
-| `bench-afxdp/xdpsock.c`                 | `-r`(rx-drop) `-t`(tx-only) `-l`(l2fwd) modes, `-s` pkt size, `-b` batch, `-z` zero-copy, `-N` native mode |
+> All paths relative to repo root `https://github.com/eTran-NSDI25/eTran`.
+> Line numbers verified against the clone at commit checked on 2026-07-06.
+
+### Benchmark / application binaries
+
+| File | Key Locations |
+|:--|:--|
+| `homa_app/cp_node.cc` | L48 `IF_NAME`="ens1f1np1"; L1457 `server_stats`, L1528 `client_stats` (Kops/Gbps/RTT P50-P99.9); L1603 `client_cmd` defaults, L1929 `server_cmd` |
+| `homa_app/dist.cc` | `w1`-`w5` CDF arrays; `dist_lookup()` handles int→fixed-size or `wN` name |
+| `tcp_app/epoll_client.cc` | `parse_args`: `-b`(msg size) `-i` `-f`(flows) `-t`(threads) `-o`(outstanding) `-w`(wait) `-l`(max_buf_size) `-s`(response toggle) |
+| `tcp_app/epoll_server.cc` | `parse_args`: `-b` `-i` `-t` `-l` `-s`; runs `while(1)`, no loop count |
+| `tcp_app/flexkvs_bench.cc` | Uses `flexkvs/commandline.c` `parse_settings()`; `--time`/`--warmup`/`--cooldown` stored but NEVER enforced |
+| `tcp_app/flexkvs_server.cc` | 3 positional args: `CONFIG THREADS QUEUES`; port hardcoded to **11211** |
+| `tcp_app/lat_client.cc` | 500K ping-pongs, sorted P50/P99/P99.9 output; `-c` flag broken (fallthrough bug) |
+
+### Microkernel (slow-path only — data is fastpath via eBPF→XSK)
+
+| File | Key Locations |
+|:--|:--|
+| `micro_kernel/micro_kernel.cc` | L51 `opt_num_queues=20` default; L106-122 `-q`(queues) `-i`(iface) `-b`(busy-poll) `-n`(napi) `-l`(tcp buf); L203 main launches `monitor_thread`, L244 `thread_init`, L259 `wait_thread` |
+| `micro_kernel/runtime/defs.h` | **L24** `MAX_APP_THREADS=20`; L25 `MAX_SUPPORT_APP=32`; **L26 `CP_CPU=19`** (offline under `nosmt`); L28-31 `enrollment_to_ms=0`, `network_to_ms=0`, `sp_interval_ms=1`; L33 `IO_BATCH_SIZE=32`; L44 `thread_init` extern |
+| `micro_kernel/control_plane.cc` | **L48** `TICK_US=1000` (1ms); **L1070 `control_loop()`** — single worker thread; L1095-1130 sequential `poll_uds`→`poll_lrpc`→`poll_network`→`poll_tcp_handshake_events`→`poll_tcp_cc_to`→`poll_homa_to` + `clock_nanosleep`; **L1137 `thread_init()`**; **L1148** single `pthread_create(control_loop)`; **L1153-1155 `CPU_SET(CP_CPU)` + `pthread_setaffinity_np` (return value NOT checked)**; L1374 `poll_lrpc` (drains per-app-thread LRPCs, calls `process_cmd`); L1406 `process_packet` (TCP-only — calls `tcp_packet`); L1487 `poll_network` (reclaims CQ + `epoll_wait` on XSK fds) |
+| `micro_kernel/homa.cc` | L485 `poll_homa_to` (1ms batch scan of BPF RPC map for zombies/retransmits); L502 `bpf_map_lookup_batch`; **L790 `process_homa_cmd`** — handles ONLY `APPOUT_HOMA_BIND` (L796) / `APPOUT_HOMA_CLOSE` (L803); no Homa data path here |
+| `micro_kernel/tcp.cc` | `tcp_packet` — slow-path TCP processing (handshake/close/cc timeouts) invoked from `process_packet` |
+
+### eBPF programs (fastpath — run at NIC)
+
+| File | Key Locations |
+|:--|:--|
+| `micro_kernel/eBPF/entrance/entrance.c` | L48 `SEC("xdp_sock")` — parses eth/IP, tail-calls into Homa/TCP transport programs; L82 `SEC("xdp_gen")`, L93 `SEC("xdp_egress")` — dispatch by umem_id; L104 `xdp/cpumap` |
+| `micro_kernel/eBPF/homa/main.c` | L29 `SEC("xdp_gen")` — **grant generator**: L59 `granting_idx[cpu]++`, L78 `min(nr_grant_candidate[cpu], HOMA_OVERCOMMITMENT)`, **L192 `return XDP_TX`** (emit grant at NIC); L211 `SEC("xdp_egress")`, **L248 `c->type != DATA`** check (XDP_EGRESS grant drop bug — apply patch at L235-248); L293 `SEC("xdp_sock")` — DATA redirector; **L413,446,455,583 `bpf_redirect_map(&xsks_map, socket_id, XDP_DROP)`** (push DATA → app XSK, bypasses mk); L590,1242,1339...2019 `xdp_gen/complete_grant_*` tail-calls (8-step grant choose) |
+| `micro_kernel/eBPF/tcp/main.c` | L30 `slow_path_map`; L34 `xsks_map` (XSKMAP); L40 `SEC("xdp_gen")` — TCP ACK gen (`bpf_xdp_adjust_tail`); L147 `SEC("xdp_egress")`; **L258 `bpf_redirect_map(&xsks_map, c->qid2xsk[ctx->rx_queue_index])`** (fastpath data → app); L265 `SEC("xdp_sock")`; L323 `XDP_PASS`; **L367,378 `bpf_redirect_map(&xsks_map, ...)`** (sp/xid redirect); L373 `slow_path_map` lookup (→ mk) |
+
+### Application library (libetran.so — the actual fastpath polling path)
+
+| File | Key Locations |
+|:--|:--|
+| `lib/eTran_rpc.cc` | **L288 `poll_nic_rx()`** and **L426 `poll_nic_rx_block(timeout)`** — the app's RX fastpath: **L323,463 `xsk_ring_cons__peek`** on each queue's RX ring; L370,505 `client_response(qidx,d)` / L372,507 `server_request(qidx,d,remote_ip,rpcid)` (DATA → app); **L187 `xsk_ring_prod__reserve(&xsk_info->tx, rm.nr_pkt)` + L203 `kick_tx(...)`** — app TX path; L717,795 more `kick_tx` sites. L443 `_pending_*` queue drain to keep busy-poll nonblocking. **This is where Homa data packets are actually consumed and processed.** |
+| `lib/eTran_posix.cc` | L159 `socket_homa_poll` (in `homa_app` shim); **L1168 `process_homa_kernel_events`** — drains `app_in` LRPC for `APPIN_HOMA_STATUS_BIND`/`CLOSE` from mk; L1228 `eTran_homa_poll_events`; L380,667,767,854,950,989 TCP XSK TX paths |
+| `lib/socket.cc` | **L405** "Connection is closed by microkernel" idle-drop message (TCP idle timeout) |
+| `lib/eTran_common.cc` | **L595 `pre_main` constructor** — reads `ETRAN_PROTO` (L600, required), `ETRAN_NR_APP_THREADS` (L598) + `ETRAN_NR_NIC_QUEUES` (L599, required for TCP) |
+| `lib/xsk_if.cc` | L20 `tx_ring_size=XSK_RING_PROD__DEFAULT_NUM_DESCS`; L38 `XDP_TX_RING` setsockopt; the per-thread XSK setup shared by app library |
+| `shared_lib/interpose.cc` | Builds `libetran.so` — LD_PRELOAD intercepts `socket`/`epoll_wait`/`read`/`write` |
+
+### Shared definitions / buffer pool
+
+| File | Key Locations |
+|:--|:--|
+| `common/tran_def/homa.h` | **L8 `HOMA_MAX_MESSAGE_LENGTH = 1000000`** (off-by-one: `--workload 1000000` stalls, use 999999); L10 `enum homa_packet_type` (DATA/GRANT/RESEND/...) |
+| `common/xskbp/xsk_buffer_pool.h` | **L33 `umem_num_frames=64*XSK_RING_PROD__DEFAULT_NUM_DESCS`**; **L39 `buffers_per_slab=2*XSK_RING_PROD__DEFAULT_NUM_DESCS`**; L70 `nr_slabs`, L73 `nr_slabs_avail` — the slab counter that asserts at `--ports > 4` under heavy Homa-grant traffic |
+| `micro_kernel/eBPF/homa/rpc.h` | L1584 `xmit_ctrl_pkt` (used by eBPF grant/ctrl TX); per-RPC state map structures |
+| `micro_kernel/eBPF/homa/pacing.h` | Grant pacing structures (per-CPU `granting_idx`, `nr_grant_candidate`, `finish_grant_choose`) |
+
+### Driver micro-bench
+
+| File | Key Locations |
+|:--|:--|
+| `bench-afxdp/xdpsock.c` | `-r`(rx-drop) `-t`(tx-only) `-l`(l2fwd) modes, `-s` pkt size, `-b` batch, `-z` zero-copy, `-N` native mode (used for Table 3/4 AF_XDP baselines) |
 
 ---
 

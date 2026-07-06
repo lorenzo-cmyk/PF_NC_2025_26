@@ -267,15 +267,43 @@ wait
 - Paper PDF: `nsdi25-chen-zhongjie.pdf` in repo root
 
 ## Key source files
-- `common/xskbp/xsk_buffer_pool.h` — buffer pool constants (umem_num_frames, buffers_per_slab)
-- `micro_kernel/eBPF/homa/main.c:240` — XDP_EGRESS grant drop bug
-- `common/tran_def/homa.h:8` — HOMA_MAX_MESSAGE_LENGTH = 1000000
-- `micro_kernel/micro_kernel.cc:51` — default queues = 20
-- `homa_app/cp_node.cc:1616` — default workload = "100"
-- `tcp_app/epoll_client.cc` — TCP throughput client; `-s` toggles response mode (default short 100B)
-- `tcp_app/epoll_server.cc` — TCP throughput server; `-s` toggles response mode
-- `tcp_app/flexkvs_server.cc` — KV server, 3 positional args (CONFIG THREADS QUEUES), port 11211 hardcoded
-- `tcp_app/flexkvs_bench.cc` — KV benchmark client; `--time`/`--warmup`/`--cooldown` stored but not enforced
-- `lib/socket.cc:405` — TCP "Connection is closed by microkernel" idle-drop message
-- `lib/eTran_common.cc` — `pre_main` constructor reads `ETRAN_PROTO` (required), `ETRAN_NR_APP_THREADS` + `ETRAN_NR_NIC_QUEUES` (required for TCP)
-- `shared_lib/` — `libetran.so` built via `interpose.cc`; LD_PRELOAD intercepts socket/epoll/read/write
+> Paths relative to the eTran repo root (`https://github.com/eTran-NSDI25/eTran`).
+> Line numbers verified against the source clone on 2026-07-06.
+
+### Fastpath (where data packets actually flow — bypasses microkernel)
+- `micro_kernel/eBPF/entrance/entrance.c` — L48 `SEC("xdp_sock")`: parses eth/IP, tail-calls into Homa (`bpf_tail_call` at L74) / TCP (L71) transport programs; L82 `xdp_gen`, L93 `xdp_egress` dispatch by umem_id
+- `micro_kernel/eBPF/homa/main.c` — L293 `SEC("xdp_sock")`: L413,446,455,583 `bpf_redirect_map(&xsks_map, socket_id, XDP_DROP)` pushes Homa DATA packets directly into the app's AF_XDP socket (does NOT go through microkernel)
+- `micro_kernel/eBPF/homa/main.c:192` — grant emitted at NIC (`return XDP_TX`) by the L29 `SEC("xdp_gen")` program; per-CPU state: L59 `granting_idx[cpu]`, L78 `min(nr_grant_candidate[cpu], HOMA_OVERCOMMITMENT)` (HOMA_OVERCOMMITMENT=8). Tail-call grant-choose at L590,1242,1339,1435,1531,1627,1723,1819,1915 (`xdp_gen/complete_grant_*`)
+- `micro_kernel/eBPF/homa/main.c:235-248` — **XDP_EGRESS grant drop bug** (order-of-checks bug — apply patch: move `c->type != DATA` check before `data_header` bounds check, route non-DATA through `xmit_packet()`)
+- `micro_kernel/eBPF/tcp/main.c:258,367,378` — `bpf_redirect_map(&xsks_map, ...)` for TCP DATA; L373 `slow_path_map` lookup (the only path that reaches mk for handshake/control)
+- `lib/eTran_rpc.cc:288,426` — `poll_nic_rx()` / `poll_nic_rx_block(timeout)`: the **app's** RX fastpath. L323,463 `xsk_ring_cons__peek` on each queue's RX ring; L370,505 `client_response` / L372,507 `server_request` (DATA consumed here, in user space)
+- `lib/eTran_rpc.cc:187,203,717,795` — app TX fastpath: `xsk_ring_prod__reserve(&xsk_info->tx, ...)` + `kick_tx(...)`
+- `lib/eTran_posix.cc:1168,1228` — `process_homa_kernel_events` / `eTran_homa_poll_events`: drains mk's slow-path LRPC responses (`APPIN_HOMA_STATUS_BIND`/`CLOSE`)
+- `lib/xsk_if.cc` — per-thread XSK setup (`XDP_TX_RING` setsockopt at L38, ring mmap at L68)
+
+### Microkernel slow-path (only bind/close/timers/handshake — NOT data dispatch)
+- `micro_kernel/micro_kernel.cc:51` — `opt_num_queues=20` default
+- `micro_kernel/micro_kernel.cc:244,259` — `thread_init()` / `wait_thread()`
+- `micro_kernel/runtime/defs.h:26` — **`CP_CPU = 19`** (offline under `nosmt`; this is the silent pin failure)
+- `micro_kernel/control_plane.cc:48` — `TICK_US=1000` (1ms slow-path cadence)
+- `micro_kernel/control_plane.cc:1070` — `control_loop()` (the single worker thread; L1095-1130 sequential `poll_uds`→`poll_lrpc`→`poll_network`→`poll_tcp_handshake_events`→`poll_tcp_cc_to`→`poll_homa_to` + `clock_nanosleep`)
+- `micro_kernel/control_plane.cc:1137` — `thread_init()`; L1148 single `pthread_create(&micro_kernel_thread, control_loop)`; L1153-1155 `CPU_SET(CP_CPU)` + `pthread_setaffinity_np` (return value NOT checked)
+- `micro_kernel/control_plane.cc:1406` — `process_packet` — **TCP-only**; L1444 calls `tcp_packet`. (No Homa branch — Homa never reaches here)
+- `micro_kernel/homa.cc:790` — `process_homa_cmd` — handles ONLY `APPOUT_HOMA_BIND` (L796) / `APPOUT_HOMA_CLOSE` (L803)
+- `micro_kernel/homa.cc:485` — `poll_homa_to` (1ms batch scan of the BPF RPC map for zombies/retransmits; L502 `bpf_map_lookup_batch`)
+
+### Buffer pool / constants
+- `common/xskbp/xsk_buffer_pool.h:33` — `umem_num_frames=64*XSK_RING_PROD__DEFAULT_NUM_DESCS`; L39 `buffers_per_slab=2*XSK_RING_PROD__DEFAULT_NUM_DESCS`; L70/L73 `nr_slabs` / `nr_slabs_avail` (the counters that assert at `--ports > 4` under heavy Homa-grant traffic)
+- `common/tran_def/homa.h:8` — `HOMA_MAX_MESSAGE_LENGTH = 1000000` (off-by-one: `--workload 1000000` stalls, use `999999`)
+- `common/tran_def/homa.h:10` — `enum homa_packet_type` (DATA/GRANT/RESEND/...)
+
+### Benchmark binaries
+- `homa_app/cp_node.cc:48` — `IF_NAME`="ens1f1np1"; L1457 `server_stats`, L1528 `client_stats`; L1616 default `--workload="100"`; L1929 `server_cmd`
+- `homa_app/dist.cc` — `w1`-`w5` CDF arrays; `dist_lookup()` handles `int`→fixed-size or `wN`
+- `tcp_app/epoll_client.cc` — TCP throughput client; `-b`(msg) `-i` `-f`(flows) `-t`(threads) `-o`(outstanding) `-w`(wait) `-l`(max_buf) `-s`(response toggle; **note** `-s` means "send full echo", default is short 100B — counterintuitive)
+- `tcp_app/epoll_server.cc` — TCP throughput server; same `-s` semantics
+- `tcp_app/flexkvs_server.cc` — KV server, 3 positional args: `CONFIG THREADS QUEUES`, port 11211 hardcoded
+- `tcp_app/flexkvs_bench.cc` — KV benchmark client; `--time`/`--warmup`/`--cooldown` stored but never enforced (always wrap in `timeout`)
+- `lib/socket.cc:405` — TCP "Connection is closed by microkernel" idle-drop message (after ~9s)
+- `lib/eTran_common.cc:595` — `pre_main` constructor: reads `ETRAN_PROTO` (L600, required), `ETRAN_NR_APP_THREADS` (L598) + `ETRAN_NR_NIC_QUEUES` (L599, required for TCP only)
+- `shared_lib/interpose.cc` — builds `libetran.so`; LD_PRELOAD intercepts `socket`/`epoll_wait`/`read`/`write`
