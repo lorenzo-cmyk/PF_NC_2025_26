@@ -37,8 +37,9 @@ for n in node0 node1 node2 ...; do
 done
 
 # 3. Start micro_kernel on all involved nodes with screen (no timeout)
-#    NO taskset — CP_CPU=19 (defs.h:26) pins the control_loop to HT sibling
-#    core 19 automatically. This only works with HT ON (the intended design).
+#    NO taskset — CP_CPU=19 (defs.h:26) pins the control_loop to core 19
+#    (the HT sibling of core 9) automatically. This only works with HT ON
+#    (the intended design).
 #    Default 20 queues matches NIC combined=20 (use `ethtool -l ens1f1np1` to check).
 for n in node0 node1 node2 ...; do
   ssh $n "sudo screen -dmS micro_kernel bash -c \
@@ -128,11 +129,11 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
   (per-CPU XDP_GEN state), so adding server ports does NOT help.
 - Metric 4: servers default ports, client `--ports 7 --client-max 1` (sweet spot for 10-core)
 - Metric 1-2: 2 nodes only
-- Metric 5: server `--ports 7` (32B safe from buffer-pool crash), clients
-  `--ports 1 --client-max 64`; no taskset (CP_CPU=19 works with HT-on).
-  Server steady ~927 Kops.
-- Metric 6: client `--ports 7 --client-max 128 --server-nodes 7` (best new sweet spot);
-  no taskset (CP_CPU=19 works). Client steady ~1120 Kops, servers ~160 Kops each.
+- Metric 5: server `--ports 7`, clients `--ports 1 --client-max 64`; no taskset
+  (CP_CPU=19 works with HT-on). Server steady ~927 Kops.
+- Metric 6: client `--ports 7 --client-max 256 --server-nodes 7` (best new sweet spot;
+  measured 2026-07-06 with default 20 queues); no taskset (CP_CPU=19 works).
+  Client steady ~1120 Kops, servers ~160 Kops each.
 - Metrics 7-12 (W2-W5 all-to-all): `--both 2 --id N` on all 10 nodes.
   Requires `micro_kernel` restart between each workload (4 total).
   Results (2026-07-06): W2 P50=109 µs P99=1344 µs (even load ~430 Kops/node);

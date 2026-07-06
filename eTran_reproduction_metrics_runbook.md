@@ -3,10 +3,10 @@
 ## Results Summary (Single-Socket xl170, 10-core E5-2640v4, SMT=on)
 
 > **Current configuration:** SMT=ON (HT enabled, 20 logical CPUs). mk's
-> `CP_CPU=19` internal pin now works — the control_loop pins to the HT sibling
-> of core 19 as designed. NO `taskset` is needed for mk. NIC has 20 combined
-> queues. App threads on physical cores 0-9, mk control_loop on core 19
-> (HT sibling of core 9). This matches the paper's §6 design.
+> `CP_CPU=19` internal pin now works — the control_loop pins to **core 19**
+> (the HT sibling of core 9) as designed. NO `taskset` is needed for mk. NIC
+> has 20 combined queues. App threads on physical cores 0-9, mk control_loop
+> on core 19 (HT sibling of core 9). This matches the paper's §6 design.
 
 | # | Metric | Our Result | Paper Target | % | Bottleneck |
 |---|--------|-----------|-------------|---|-----------|
@@ -68,8 +68,9 @@
   so the gap is a real software/tuning bug — investigate these, not cores.
 - Affinity: NO taskset for micro_kernel (CP_CPU=19 internal pin succeeds with HT-on).
   Optionally pin app threads to physical cores 0-9 for consistent scheduling.
-  This matches the paper's §6 design: mk control_loop on core 19 (HT sibling),
-  app threads on physical cores 0-9. With the old `nosmt` config, `taskset -c 9`
+  This matches the paper's §6 design: mk control_loop on core 19
+  (the HT sibling of core 9), app threads on physical cores 0-9.
+  With the old `nosmt` config, `taskset -c 9`
   on mk gave a 5-25% lift over the roaming baseline, but HT-on + CP_CPU=19
   working gives ~8% additional improvement on metric 5.
 - Metric 3 is bounded by the Homa grant dispatch through the XDP_GEN tail-call
@@ -91,8 +92,8 @@
 
 Cross-references each metric from `eTran_reproduction_metrics_relevant.md`
 against source code in:
-- **eTran repo**: `https://github.com/eTran-NSDI25/eTran` (`eTran/homa_app/cp_node.cc`,
-  `eTran/tcp_app/epoll_*.cc`, `eTran/tcp_app/flexkvs_*`, `eTran/lib/eTran_common.cc`)
+- **eTran repo**: `https://github.com/eTran-NSDI25/eTran` (`homa_app/cp_node.cc`,
+  `tcp_app/epoll_*.cc`, `tcp_app/flexkvs_*`, `lib/eTran_common.cc`)
 - **Homa upstream**: `https://github.com/PlatformLab/HomaModule` (`util/cp_node.cc`)
 - **Paper**: §6.1, Figures 5-6 (Gbps values confirmed from figure captions)
 
@@ -139,7 +140,7 @@ against source code in:
        sudo rm -f /dev/shm/BufferPool_* /dev/shm/UMEM_* /dev/shm/LRPC_*'
 
     # NO taskset for micro_kernel — CP_CPU=19 (defs.h:26) pins control_loop
-    # to HT sibling core 19 automatically. Only works with HT ON.
+    # to core 19 (the HT sibling of core 9) automatically. Only works with HT ON.
     # Default 20 queues matches NIC combined=20.
     ssh node0 "sudo screen -dmS micro_kernel bash -c 'cd /local/eTran/eTran/micro_kernel && exec ./micro_kernel -i ens1f1np1'"
     ssh node1 "sudo screen -dmS micro_kernel bash -c 'cd /local/eTran/eTran/micro_kernel && exec ./micro_kernel -i ens1f1np1'"
@@ -163,7 +164,7 @@ against source code in:
 
 ## cp_node Argument Reference
 
-Verified against `eTran/homa_app/cp_node.cc` and upstream `PlatformLab/HomaModule/util/cp_node.cc`.
+Verified against `homa_app/cp_node.cc` (eTran) and upstream `PlatformLab/HomaModule/util/cp_node.cc`.
 
 ### Client options (`cp_node client [opts]`)
 
