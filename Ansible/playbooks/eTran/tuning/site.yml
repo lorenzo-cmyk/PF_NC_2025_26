@@ -1,6 +1,6 @@
 ---
 - name: eTran full node tuning
   import_playbook: 01-sysbench-baseline.yml
-- import_playbook: 02-disable-smt-mitigations.yml
+- import_playbook: 02-tune-boot-params.yml
 - import_playbook: 03-tuned.yml
 - import_playbook: 04-verify-tuning.yml

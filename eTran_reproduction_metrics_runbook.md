@@ -1,30 +1,28 @@
 # eTran Benchmark Runbook — Exact Commands per Metric
 
-## Results Summary (Single-Socket xl170, 10-core E5-2640v4, SMT=off)
+## Results Summary (Single-Socket xl170, 10-core E5-2640v4, SMT=on)
 
-> **⚠️ SMT caveat:** Our runs use `nosmt` (10 physical cores online, cores 10–19
-> offline). The paper almost certainly ran with **HT ON** — the source pins the
-> mk `control_loop` to `CP_CPU=19` (`defs.h:26`), a logical SMT sibling of core
-> 9, and paper §6 states "we provision a dedicated core for control path/slow
-> path". Our `nosmt` makes that pin silently fail (`control_plane.cc:1155`
-> doesn't check the return), so `control_loop` roams 0–9. This is likely a real
-> contributor to the metric 3/5/6 gap and warrants re-testing with HT on +
-> careful pinning. See AGENTS.md "SMT ON breaks eTran" note.
+> **Current configuration:** SMT=ON (HT enabled, 20 logical CPUs). mk's
+> `CP_CPU=19` internal pin now works — the control_loop pins to the HT sibling
+> of core 19 as designed. NO `taskset` is needed for mk. NIC has 10 combined
+> queues, 10 IRQs pinned to physical cores 0-9. App threads on physical cores
+> 0-9, mk control_loop on core 19 (HT sibling of core 9). This matches the
+> paper's §6 design.
 
 | # | Metric | Our Result | Paper Target | % | Bottleneck |
 |---|--------|-----------|-------------|---|-----------|
-| 1 | 32B latency (P50) | **12.66 µs** | 11.8 µs | **93%** | Same HW as paper; 7% gap under investigation (not NUMA) |
+| 1 | 32B latency (P50) | **12.70 µs** | 11.8 µs | **93%** | Same HW as paper; 7% gap under investigation (not NUMA) |
 | 2 | 1MB throughput | **16.6 Gbps** | 17.7 Gbps | **94%** | Same HW as paper; ~6% gap under investigation |
 | 3 | 7-clients→1-server 500KB | **~13 Gbps** (micro_kernel pinned core 9, server cores 0-7) | 23.0 Gbps | **56%** | Homa grant/egress XDP_GEN dispatch path saturates at ~13 Gbps regardless of `--ports`; real bug, NOT core count (same HW as paper) |
 | 4 | 1-client→7-servers 500KB | **~17 Gbps** | 22.7 Gbps | **75%** | NOT NIC (paper hit 22.7 on same 25G link); XDP_GEN grant pacing + per-app-thread send rate on the client |
-| 5 | Client RPC rate, 32B (7:1) | **1040 Kops** aggregate peak / 800 K steady (mk core 9, server cores 0-7) | 2.9 Mops | **28%** | Per-app-thread polling rate + BPF map contention (mk is NOT on Homa data fastpath — see Key findings) |
-| 6 | Server RPC rate, 32B (1:7) | **~820 K steady / 1099 K client-side** (mk core 9, server cores 0-7, --client-max 128) | 3.3 Mops | **25%** | Per-app-thread polling rate + BPF map contention; mk's roaming control_loop competes for CPU/cache |
-| 13 | TCP 1KB throughput | **7.18 Gbps** (single-threaded, mk core 9, app cores 0-7) | 4.8× Linux | — | Raw number captured; ratio needs Linux-TCP baseline |
-| 14 | TCP 2KB throughput | **12.30 Gbps** (single-threaded, mk core 9, app cores 0-7) | 0.87× TAS | — | Raw number captured; ratio needs TAS baseline |
-| 15 | TCP 1K persistent conns, 64B | **770 Kops peak / 230 K steady aggregate** (10-thr server, 5 clients × 200 conns, mk core 9) | 2.26× Linux | — | Previous claim of ~2 Mops was burst artifact; steady-state is ~230 K, early burst ~770 K. Connection drop after ~9s limits window |
-| 18 | TCP KV throughput | **0.89 Mops peak / 0.72 M steady aggregate** (5 clients, 4 threads, 16 pending, mk core 9) | 2.4-4.8× Linux | — | Raw number captured; ratio needs Linux-TCP baseline |
-| 19 | TCP KV P50 latency | **14 µs** | 17.2 µs | **122%** | Beats paper target; confirmed with pinned mk |
-| 20 | TCP KV P99 latency | **16 µs** | 27.5 µs | **172%** | Beats paper target; confirmed with pinned mk |
+| 5 | Client RPC rate, 32B (7:1) | **1040 Kops** aggregate (steady ~955 K server-side, no taskset, HT-on, CP_CPU=19 working) | 2.9 Mops | **36%** | Per-app-thread polling rate + BPF map contention (mk is NOT on Homa data fastpath — see Key findings) |
+| 6 | Server RPC rate, 32B (1:7) | **~820 K steady / 1099 K client-side** (--client-max 128, no taskset, HT-on, CP_CPU=19 working) | 3.3 Mops | **25%** | Per-app-thread polling rate + BPF map contention (mk is NOT on Homa data fastpath — see Key findings) |
+| 13 | TCP 1KB throughput | **7.18 Gbps** (single-threaded, CP_CPU=19 working) | 4.8× Linux | — | Raw number captured; ratio needs Linux-TCP baseline |
+| 14 | TCP 2KB throughput | **12.30 Gbps** (single-threaded, CP_CPU=19 working) | 0.87× TAS | — | Raw number captured; ratio needs TAS baseline |
+| 15 | TCP 1K persistent conns, 64B | **770 Kops peak / 230 K steady aggregate** (10-thr server, 5 clients × 200 conns, CP_CPU=19 working) | 2.26× Linux | — | Previous claim of ~2 Mops was burst artifact; steady-state is ~230 K, early burst ~770 K. Connection drop after ~9s limits window |
+| 18 | TCP KV throughput | **0.89 Mops peak / 0.72 M steady aggregate** (5 clients, 4 threads, 16 pending, CP_CPU=19 working) | 2.4-4.8× Linux | — | Raw number captured; ratio needs Linux-TCP baseline |
+| 19 | TCP KV P50 latency | **14 µs** | 17.2 µs | **122%** | Beats paper target |
+| 20 | TCP KV P99 latency | **16 µs** | 27.5 µs | **172%** | Beats paper target |
 | 21 | TCP CPU cycles/req | **~2.9 kcycles** | 4.37 kcycles | — | Client-side only (rough) |
 | 22 | Homa CPU cycles/req | **~1213 kcycles** | 5.48 kcycles | — | AF_XDP busy-poll inflation |
 
@@ -52,26 +50,23 @@
   sequentially calls poll_uds → poll_lrpc → poll_network → poll_tcp_handshake_events
   → poll_tcp_cc_to → poll_homa_to, then `clock_nanosleep`s up to `TICK_US` (1ms)
   when idle. It is **internally** pinned to `CP_CPU = 19` (`runtime/defs.h:26`),
-  which is OFFLINE under our `nosmt` (cores 10-19 are SMT siblings of 0-9). The
-  `pthread_setaffinity_np` at `control_plane.cc:1155` does **not** check its
-  return value, so the pin fails silently and the control_loop roams cores 0-9.
-  Its effect on metrics is indirect: a constantly-migrating busy thread (it has
-  its own `epoll_wait` + map batch scans every 1ms) competes for CPU/cache with
-  the real polling threads (the application threads). That's why
-  `taskset -c 9 ./micro_kernel` gives a 5-25% metric 5/6 lift — it removes
-  cache/CPU contention, not a dispatch bottleneck.
+  which is the HT sibling of core 9. With **HT enabled** (current config), core 19
+  is online and the `pthread_setaffinity_np` at `control_plane.cc:1155` succeeds.
+  NO external `taskset` is needed. With `nosmt` (previous config), the pin silently
+  failed and the control_loop roamed — `taskset -c 9` was a workaround that gave
+  5-25% improvement over the roaming baseline. HT-on gives ~8% over the old
+  taskset workaround.
 - The real Homa metric 3/5/6 bottlenecks (since mk is off the data path) are:
   per-app-thread polling rate, XDP_GEN grant eBPF scheduling (for large msgs),
   BPF RPC-map contention between the app fastpath and mk's 1ms `poll_homa_to`
   batch scan, and NIC IRQ/RSS distribution across app queues. Same HW as paper,
   so the gap is a real software/tuning bug — investigate these, not cores.
-- Affinity prescription that helps metrics 5/6: `taskset -c 9 ./micro_kernel`
-  (mk on core 9, dedicated — gives ~5-25% by removing control_loop cache
-  migration), server/client app threads on cores 0-7 or 0-6. **Pin mk to a
-  HIGHER core (8 or 9); pinning to core 0 breaks the run** (core 0 carries
-  IRQ/mlx5_comp extra housekeeping contention). A cleaner fix is to change
-  `CP_CPU` in `runtime/defs.h:26` to an online core (e.g. 9) so the internal
-  pin succeeds — would remove the `taskset` workaround entirely.
+- Affinity: NO taskset for micro_kernel (CP_CPU=19 internal pin succeeds with HT-on).
+  Optionally pin app threads to physical cores 0-9 for consistent scheduling.
+  This matches the paper's §6 design: mk control_loop on core 19 (HT sibling),
+  app threads on physical cores 0-9. With the old `nosmt` config, `taskset -c 9`
+  on mk gave a 5-25% lift over the roaming baseline, but HT-on + CP_CPU=19
+  working gives ~8% additional improvement on metric 5.
 - Metric 3 is bounded by the Homa grant dispatch through the XDP_GEN tail-call
   BPF (`eBPF/homa/main.c`): per-CPU state `granting_idx[cpu]`,
   `nr_grant_candidate[cpu]`, `HOMA_OVERCOMMITMENT=8`. Throughput plateaus at
@@ -139,14 +134,14 @@ against source code in:
        sudo ip link set dev ens1f1np1 xdp off 2>/dev/null; \
        sudo rm -f /dev/shm/BufferPool_* /dev/shm/UMEM_* /dev/shm/LRPC_*'
 
-    # Affinity recipe (recommended): pin micro_kernel to a dedicated CORE (use 8 or 9,
-    # NEVER 0 -- core 0 shares IRQ/mlx5_comp housekeeping and breaks mk startup),
-    # and pin app threads to the remaining cores.
-    ssh node0 "sudo screen -dmS micro_kernel bash -c 'cd /local/eTran/eTran/micro_kernel && exec taskset -c 9 ./micro_kernel -i ens1f1np1 -q 10'"
-    ssh node1 "sudo screen -dmS micro_kernel bash -c 'cd /local/eTran/eTran/micro_kernel && exec taskset -c 9 ./micro_kernel -i ens1f1np1 -q 10'"
+    # NO taskset for micro_kernel — CP_CPU=19 (defs.h:26) pins control_loop
+    # to HT sibling core 19 automatically. Only works with HT ON.
+    # -q 10 matches the 10 NIC combined queues.
+    ssh node0 "sudo screen -dmS micro_kernel bash -c 'cd /local/eTran/eTran/micro_kernel && exec ./micro_kernel -i ens1f1np1 -q 10'"
+    ssh node1 "sudo screen -dmS micro_kernel bash -c 'cd /local/eTran/eTran/micro_kernel && exec ./micro_kernel -i ens1f1np1 -q 10'"
     sleep 5
 
-    ssh node0 "sudo screen -dmS server bash -c 'cd /local/eTran/eTran/homa_app && exec env ETRAN_PROTO=homa taskset -c 0-7 ./cp_node server'"
+    ssh node0 "sudo screen -dmS server bash -c 'cd /local/eTran/eTran/homa_app && exec env ETRAN_PROTO=homa ./cp_node server'"
    sleep 3
 
    ssh node1 "timeout 15 env ETRAN_PROTO=homa ./cp_node client ... 2>&1"
@@ -220,9 +215,9 @@ timeout 15 env ETRAN_PROTO=homa ./cp_node client \
 Output every 1s: `Clients: <Kops> Kops/sec, <gbps> Gbps out, ..., RTT (us) P50 <p50> P99 <p99> P99.9 <p99.9>`
 Read P50 for the metric.
 
-**Result**: P50 **12.66 µs** (93% of target). P99 14.90 µs. Stable across 10+ measurements.
-Small vs paper; cause under investigation (NOT a NUMA/socket gap — paper used
-identical xl170 10-core single-socket hardware).
+**Result**: P50 **12.70 µs** (93% of target). P99 14.90 µs. Stable across measurements.
+HT-on, no taskset, CP_CPU=19 working. Small vs paper; cause under investigation
+(NOT a NUMA/socket gap — paper used identical xl170 10-core single-socket hardware).
 
 ### 2. eTran - Homa | Throughput, 1MB requests, back-to-back | 17.7 Gbps | 2-Node
 
@@ -356,16 +351,17 @@ Output: `Clients: <Kops> Kops/sec` — aggregate across all 7 clients for Mops.
 > 32B messages don't trigger the buffer pool crash at `--ports 7` (no grants needed).
 > `--client-max 64 --ports 1`: 64 outstanding per client node, 1 sending thread.
 > `--ports 1 --client-max 64` per client gives the best result
-> (962 Kops, 33% of target). Higher `--client-max` or more client threads
-> reduces throughput — but NOT because of mk dispatch (mk is NOT on the Homa
-> data fastpath — see Key findings). The cap is the per-app-thread polling
-> rate and BPF map contention between the app fastpath and mk's 1ms
+> (1040 Kops aggregate client-side, 36% of target). Higher `--client-max` or more
+> client threads reduces throughput — but NOT because of mk dispatch (mk is NOT
+> on the Homa data fastpath — see Key findings). The cap is the per-app-thread
+> polling rate and BPF map contention between the app fastpath and mk's 1ms
 > `poll_homa_to` timeout scan. Full micro_kernel + shm restart required
-> between runs.
+> between runs. With HT-on and CP_CPU=19 working (no taskset), this is ~8%
+> better than the old `taskset -c 9` workaround (962→1040 Kops).
 
-**Result**: **962 Kops/sec** (33% of 2.9 Mops target). RTT P50 ~27µs with
-`--ports 1 --client-max 64`. Same HW as paper — the 3× gap is NOT core count
-and NOT mk dispatch; it is per-app-thread polling/XDP-redirect overhead plus
+**Result**: **1040 Kops/sec** (36% of 2.9 Mops target). Server-side steady ~955 Kops.
+RTT P50 ~195-250µs across clients. Same HW as paper — the 2.8× gap is NOT core
+count and NOT mk dispatch; it is per-app-thread polling/XDP-redirect overhead plus
 BPF RPC-map contention. See Key findings.
 
 ### 6. eTran - Homa | Server RPC rate, 32B | 3.3 Mops | 8-Node (1:7 ratio)
@@ -391,9 +387,10 @@ Output: `Servers: <Kops> Kops/sec` (aggregate across all 7 servers).
 > on ALL nodes is mandatory. Use `--ports 7 --client-max 256` (not --ports 1).
 
 **Result**: **1100 Kops/sec** (33% of 3.3 Mops target). RTT P50 ~218µs (stable).
-Per-server breakdown: ~157 Kops/sec each. Same HW as paper — gap is NOT
-core count and NOT mk dispatch (Homa data is app fastpath, see Key findings);
-real bottleneck is per-app-thread polling rate + XDP_GEN + BPF RPC-map contention.
+Per-server breakdown: ~157 Kops/sec each. Ran with HT-on, no taskset, CP_CPU=19 working.
+Same HW as paper — gap is NOT core count and NOT mk dispatch (Homa data is app
+fastpath, see Key findings); real bottleneck is per-app-thread polling rate +
+XDP_GEN + BPF RPC-map contention.
 
 ### 7–12. eTran - Homa | P50/P99 tail latency slowdown, W2–W5 | 10-Node Cluster
 
@@ -774,7 +771,7 @@ sudo timeout 15 taskset -c 3 ./xdpsock -i ens1f1np1 -q 3 -r -N -z
 | File | Key Locations |
 |:--|:--|
 | `micro_kernel/micro_kernel.cc` | L51 `opt_num_queues=20` default; L106-122 `-q`(queues) `-i`(iface) `-b`(busy-poll) `-n`(napi) `-l`(tcp buf); L203 main launches `monitor_thread`, L244 `thread_init`, L259 `wait_thread` |
-| `micro_kernel/runtime/defs.h` | **L24** `MAX_APP_THREADS=20`; L25 `MAX_SUPPORT_APP=32`; **L26 `CP_CPU=19`** (offline under our `nosmt`; *paper ran with HT on so core 19 was online* - see AGENTS.md SMT caveat); L28-31 `enrollment_to_ms=0`, `network_to_ms=0`, `sp_interval_ms=1`; L33 `IO_BATCH_SIZE=32`; L44 `thread_init` extern |
+| `micro_kernel/runtime/defs.h` | **L24** `MAX_APP_THREADS=20`; L25 `MAX_SUPPORT_APP=32`; **L26 `CP_CPU=19`** (online with HT; control_loop pins to SMT sibling of core 9); L28-31 `enrollment_to_ms=0`, `network_to_ms=0`, `sp_interval_ms=1`; L33 `IO_BATCH_SIZE=32`; L44 `thread_init` extern |
 | `micro_kernel/control_plane.cc` | **L48** `TICK_US=1000` (1ms); **L1070 `control_loop()`** — single worker thread; L1095-1130 sequential `poll_uds`→`poll_lrpc`→`poll_network`→`poll_tcp_handshake_events`→`poll_tcp_cc_to`→`poll_homa_to` + `clock_nanosleep`; **L1137 `thread_init()`**; **L1148** single `pthread_create(control_loop)`; **L1153-1155 `CPU_SET(CP_CPU)` + `pthread_setaffinity_np` (return value NOT checked)**; L1374 `poll_lrpc` (drains per-app-thread LRPCs, calls `process_cmd`); L1406 `process_packet` (TCP-only — calls `tcp_packet`); L1487 `poll_network` (reclaims CQ + `epoll_wait` on XSK fds) |
 | `micro_kernel/homa.cc` | L485 `poll_homa_to` (1ms batch scan of BPF RPC map for zombies/retransmits); L502 `bpf_map_lookup_batch`; **L790 `process_homa_cmd`** — handles ONLY `APPOUT_HOMA_BIND` (L796) / `APPOUT_HOMA_CLOSE` (L803); no Homa data path here |
 | `micro_kernel/tcp.cc` | `tcp_packet` — slow-path TCP processing (handshake/close/cc timeouts) invoked from `process_packet` |

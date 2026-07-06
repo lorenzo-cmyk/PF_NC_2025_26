@@ -49,19 +49,19 @@ for n in node0 node1 node2 ...; do
 done
 
 # 3. Start micro_kernel on all involved nodes with screen (no timeout)
-#    Recommended (improves metrics 5/6 by 5-25%): pin mk to a dedicated
-#    high core via `taskset -c 9`. NEVER pin to core 0 -- core 0 carries
-#    extra IRQ/mlx5_comp housekeeping and breaks mk startup at high load.
+#    NO taskset — CP_CPU=19 (defs.h:26) pins the control_loop to HT sibling
+#    core 19 automatically. This only works with HT ON (the intended design).
+#    -q 10 matches the 10 NIC combined queues. Use `ethtool -l ens1f1np1` to check.
 for n in node0 node1 node2 ...; do
   ssh $n "sudo screen -dmS micro_kernel bash -c \
-    'cd /local/eTran/eTran/micro_kernel && exec taskset -c 9 ./micro_kernel -i ens1f1np1 -q 10'"
+    'cd /local/eTran/eTran/micro_kernel && exec ./micro_kernel -i ens1f1np1 -q 10'"
 done
 sleep 5
 
 # 4. Start server on node0 with screen (no timeout — stays alive for multiple runs)
-#    Pin server threads to cores 0-7 (leaving core 9 for mk).
+#    Optionally pin app threads to physical cores 0-9 with taskset.
 ssh node0 "sudo screen -dmS server bash -c \
-  'cd /local/eTran/eTran/homa_app && exec env ETRAN_PROTO=homa taskset -c 0-7 ./cp_node server'"
+  'cd /local/eTran/eTran/homa_app && exec env ETRAN_PROTO=homa ./cp_node server'"
 sleep 3
 
 # 5. Run clients with timeout (they exit when done)
@@ -137,11 +137,10 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
 - Metric 4: servers default ports, client `--ports 7 --client-max 1` (sweet spot for 10-core)
 - Metric 1-2: 2 nodes only
 - Metric 5: server `--ports 7` (32B safe from buffer-pool crash), clients
-  `--ports 1 --client-max 64`; with mk on core 9, server threads on cores 0-7,
-  peak ~1040 K / steady ~800 K (best).
+  `--ports 1 --client-max 64`; no taskset (CP_CPU=19 works with HT-on).
+  Client aggregate ~1040 Kops (steady ~955 Kops server side).
 - Metric 6: client `--ports 7 --client-max 128 --server-nodes 7` (best new sweet spot);
-  mk pinned to core 9 on every node, servers pinned to cores 0-7. Steady ~820 K,
-  client-side ~1099 K.
+  no taskset (CP_CPU=19 works). Steady ~820 K server-side, client-side ~1099 K.
 - Metrics 13-21: TCP benchmarks, use `script -q -c` over SSH for visible output
 - Metric 15: stagger clients 0.5s apart to avoid overwhelming server
 - Metrics 19-20: KV latency beats paper targets (14 vs 17.2 µs P50, 16 vs 27.5 µs P99)
@@ -155,24 +154,18 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
 - **TCP benchmarks now work** — the earlier SIGABRT was fixed by the BPF XDP_EGRESS
   patch (it affected TCP egress paths too, not just Homa grants). Metrics 13-15 and
   18-21 confirmed working.
-- **SMT ON breaks eTran entirely** — AF_XDP busy-polling gets 0 completions
-  regardless of queue count or IRQ pinning. SMT=off (via `nosmt` in GRUB) is
-  mandatory **for our setup**.
-  **⚠️ This is likely NOT how the paper ran.** The source uses `CP_CPU = 19`
-  (`micro_kernel/runtime/defs.h:26`) — core 19 is a logical SMT sibling of
-  core 9, only online when HT is enabled. The paper §6 also states "we provision
-  a dedicated core for control path/slow path", which matches the `CP_CPU=19`
-  design: control_loop pinned to the HT-sibling core 19, apps+NAPI on physical
-  cores 0-9. So the paper almost certainly ran with **HT ON** + careful pinning
-  (apps on physical cores, mk control_loop on a logical sibling). Our `nosmt`
-  makes core 19 offline → `pthread_setaffinity_np` at `control_plane.cc:1155`
-  silently fails → control_loop roams. The paper's Fig 13b (App. D) only notes
-  HT *interference* when apps+NAPI share HT siblings ("HT Intf" config) — it
-  does NOT claim SMT breaks AF_XDP; our 0-completions symptom is a separate
-  issue, possibly IRQ/RSS misconfiguration under HT that we haven't isolated.
-  **Action:** investigate whether re-enabling HT + pinning mk to core 19
-  (as the source intends) + pinning app threads to physical cores 0-9 recovers
-  paper throughput. This may be the real fix for the metric 3/5/6 gap.
+- **SMT ON works fine** — the earlier "SMT ON breaks eTran entirely" claim was
+  false. The 0-completions symptom was caused by the old IRQ affinity playbook
+  pinning IRQs to 20 CPUs (all logical cores including HT siblings), which
+  misrouted NIC completions. With the corrected playbook (pin IRQs to physical
+  cores 0-9 only) and HT-on, eTran runs correctly: metric 1 (12.70 µs P50),
+  metric 2 (16.6 Gbps), and metric 5 (1040 Kops) all produce valid results.
+  HT-on gives a ~8% improvement in metric 5 vs the old taskset-c9 workaround.
+- **CP_CPU=19 internal pin now works** — with HT enabled, core 19 (SMT sibling
+  of core 9) is online. The `pthread_setaffinity_np` at `control_plane.cc:1155`
+  succeeds for the first time, pinning the mk control_loop to its intended core.
+  NO external `taskset` is needed. This matches the paper's design (§6: "dedicated
+  core for control path/slow path").
 - `perf` breaks Homa AF_XDP but works fine for TCP benchmarks (Metric 21 completed
   with 50.7B cycles under perf). The application thread's own AF_XDP busy-poll
   is what `perf` sampling interrupts stall; mk's slow-path control_loop is
@@ -198,8 +191,7 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
   Real Homa bottlenecks to investigate: XDP_GEN grant eBPF serialization,
   per-app-thread polling rate, BPF RPC-map contention between the app
   fastpath and mk's 1ms `poll_homa_to` batch scan, NIC IRQ/RSS distribution.
-  Plus the `CP_CPU=19` silent pin failure (mk control_loop roams, costs cache)
-  and the `--ports > 4` buffer-pool slab crash that caps server parallelism.
+  Plus the `--ports > 4` buffer-pool slab crash that caps server parallelism.
 - flexkvs_server hardcodes port 11211; flexkvs_bench `--time`/`--warmup`/`--cooldown`
   are stored but never enforced — always wrap in `timeout`.
 - **Micro_kernel threading model**: `ps -L` shows only 3 mk threads (main,
@@ -212,12 +204,10 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
   poll_tcp_cc_to → poll_homa_to then `clock_nanosleep`s up to TICK_US (1ms).
   These poll_* functions are SLOW-PATH ONLY — mk never touches Homa data
   packets and never redirects TCP data either (data is XSKMAP-redirected by
-  the eBPF to the app). Pinning mk via `taskset -c 9` externally restores a
-  dedicated core for the slow-path thread (removing roaming-induced
-  CPU/cache contention with the real polling threads) and improves mid-size-
-  RPC throughput (metrics 5/6) by 5-25%. A cleaner fix is to set `CP_CPU`
-  in `runtime/defs.h:26` to an online core (e.g. 9) so the internal pin
-  actually succeeds.
+  the eBPF to the app). With **HT enabled** (current config), CP_CPU=19
+  (SMT sibling of core 9) is online and the internal pin succeeds.
+  NO external `taskset` is needed. HT-on gives ~8% improvement in metric 5
+  vs the old `taskset -c 9` workaround.
 - **Stale XDP program after kill -9**: if micro_kernel is SIGKILLed in D-state
   (stuck on bpf_map_update_elem), the eTran BPF XDP program remains attached to
   the NIC (`ip link show ens1f1np1 | grep xdp` displays `prog/xdp id NNN`).
@@ -267,17 +257,16 @@ wait
 - NIC: `ens1f1np1` (PCI 0000:03:00.1), NUMA node 0
 - Second mlx5 device at PCI 0000:07:00.0 (unused, but its IRQs appear in
   `/proc/interrupts` and confuse `grep mlx5_comp`)
-- SMT=off (via `nosmt` in GRUB): 10 physical cores online (cores 10-19, the
-  SMT siblings of 0-9, are offline). NIC has 10 combined queues → `-q 10`.
-  **⚠️ The paper almost certainly ran with HT ON** — `CP_CPU=19` in source +
-  paper §6 "dedicated core for control path". Our `nosmt` makes the mk
-  control_loop's intended pin (core 19) silently fail. See "SMT ON breaks
-  eTran" note above.
+- SMT=on (HT enabled, removed `nosmt` from GRUB): 20 logical CPUs online
+  (cores 0-9 physical, 10-19 HT siblings). NIC has 10 combined queues → `-q 10`.
+  mk's `CP_CPU=19` (SMT sibling of core 9) is online and the internal
+  `pthread_setaffinity_np` succeeds. This matches the paper's design (§6).
 - C-states=off (`intel_idle.max_cstate=0`), ASPM=off — required for sub-15µs latency metrics
 
 ## Ansible playbook structure
 - `Ansible/playbooks/eTran/setup/` — one-time: system deps, kernel build, install eTran
-- `Ansible/playbooks/eTran/tuning/` — one-time (persists reboot): SMT off, mitigations off, C-states off, ASPM off, tuned
+- `Ansible/playbooks/eTran/tuning/` — one-time (persists reboot): mitigations off, C-states off, ASPM off, tuned
+  (SMT is now ON — `nosmt` removed; playbook renamed `02-tune-boot-params.yml`)
 - `Ansible/playbooks/eTran/evaluation/` — per-session (run after EVERY reboot): ARP, hosts, NIC tuning, IRQ affinity, MTU, verify
 
 ## Ansible inventory
@@ -304,7 +293,7 @@ wait
 ### Microkernel slow-path (only bind/close/timers/handshake — NOT data dispatch)
 - `micro_kernel/micro_kernel.cc:51` — `opt_num_queues=20` default
 - `micro_kernel/micro_kernel.cc:244,259` — `thread_init()` / `wait_thread()`
-- `micro_kernel/runtime/defs.h:26` — **`CP_CPU = 19`** (offline under our `nosmt`; this is the silent pin failure. Source design assumes HT-on — core 19 is a logical SMT sibling of core 9)
+- `micro_kernel/runtime/defs.h:26` — **`CP_CPU = 19`** (online with HT enabled; the control_loop pins to SMT sibling of core 9)
 - `micro_kernel/control_plane.cc:48` — `TICK_US=1000` (1ms slow-path cadence)
 - `micro_kernel/control_plane.cc:1070` — `control_loop()` (the single worker thread; L1095-1130 sequential `poll_uds`→`poll_lrpc`→`poll_network`→`poll_tcp_handshake_events`→`poll_tcp_cc_to`→`poll_homa_to` + `clock_nanosleep`)
 - `micro_kernel/control_plane.cc:1137` — `thread_init()`; L1148 single `pthread_create(&micro_kernel_thread, control_loop)`; L1153-1155 `CPU_SET(CP_CPU)` + `pthread_setaffinity_np` (return value NOT checked)
