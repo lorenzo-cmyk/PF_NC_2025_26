@@ -2,6 +2,15 @@
 
 ## Results Summary (Single-Socket xl170, 10-core E5-2640v4, SMT=off)
 
+> **⚠️ SMT caveat:** Our runs use `nosmt` (10 physical cores online, cores 10–19
+> offline). The paper almost certainly ran with **HT ON** — the source pins the
+> mk `control_loop` to `CP_CPU=19` (`defs.h:26`), a logical SMT sibling of core
+> 9, and paper §6 states "we provision a dedicated core for control path/slow
+> path". Our `nosmt` makes that pin silently fail (`control_plane.cc:1155`
+> doesn't check the return), so `control_loop` roams 0–9. This is likely a real
+> contributor to the metric 3/5/6 gap and warrants re-testing with HT on +
+> careful pinning. See AGENTS.md "SMT ON breaks eTran" note.
+
 | # | Metric | Our Result | Paper Target | % | Bottleneck |
 |---|--------|-----------|-------------|---|-----------|
 | 1 | 32B latency (P50) | **12.66 µs** | 11.8 µs | **93%** | Same HW as paper; 7% gap under investigation (not NUMA) |
@@ -765,7 +774,7 @@ sudo timeout 15 taskset -c 3 ./xdpsock -i ens1f1np1 -q 3 -r -N -z
 | File | Key Locations |
 |:--|:--|
 | `micro_kernel/micro_kernel.cc` | L51 `opt_num_queues=20` default; L106-122 `-q`(queues) `-i`(iface) `-b`(busy-poll) `-n`(napi) `-l`(tcp buf); L203 main launches `monitor_thread`, L244 `thread_init`, L259 `wait_thread` |
-| `micro_kernel/runtime/defs.h` | **L24** `MAX_APP_THREADS=20`; L25 `MAX_SUPPORT_APP=32`; **L26 `CP_CPU=19`** (offline under `nosmt`); L28-31 `enrollment_to_ms=0`, `network_to_ms=0`, `sp_interval_ms=1`; L33 `IO_BATCH_SIZE=32`; L44 `thread_init` extern |
+| `micro_kernel/runtime/defs.h` | **L24** `MAX_APP_THREADS=20`; L25 `MAX_SUPPORT_APP=32`; **L26 `CP_CPU=19`** (offline under our `nosmt`; *paper ran with HT on so core 19 was online* - see AGENTS.md SMT caveat); L28-31 `enrollment_to_ms=0`, `network_to_ms=0`, `sp_interval_ms=1`; L33 `IO_BATCH_SIZE=32`; L44 `thread_init` extern |
 | `micro_kernel/control_plane.cc` | **L48** `TICK_US=1000` (1ms); **L1070 `control_loop()`** — single worker thread; L1095-1130 sequential `poll_uds`→`poll_lrpc`→`poll_network`→`poll_tcp_handshake_events`→`poll_tcp_cc_to`→`poll_homa_to` + `clock_nanosleep`; **L1137 `thread_init()`**; **L1148** single `pthread_create(control_loop)`; **L1153-1155 `CPU_SET(CP_CPU)` + `pthread_setaffinity_np` (return value NOT checked)**; L1374 `poll_lrpc` (drains per-app-thread LRPCs, calls `process_cmd`); L1406 `process_packet` (TCP-only — calls `tcp_packet`); L1487 `poll_network` (reclaims CQ + `epoll_wait` on XSK fds) |
 | `micro_kernel/homa.cc` | L485 `poll_homa_to` (1ms batch scan of BPF RPC map for zombies/retransmits); L502 `bpf_map_lookup_batch`; **L790 `process_homa_cmd`** — handles ONLY `APPOUT_HOMA_BIND` (L796) / `APPOUT_HOMA_CLOSE` (L803); no Homa data path here |
 | `micro_kernel/tcp.cc` | `tcp_packet` — slow-path TCP processing (handshake/close/cc timeouts) invoked from `process_packet` |
