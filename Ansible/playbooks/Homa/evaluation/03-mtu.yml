@@ -1,0 +1,14 @@
+---
+- name: eTran evaluation — set MTU
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    mtu: 9000
+    iface: ens1f1np1
+  tasks:
+    - name: Set MTU on primary interface
+      ansible.builtin.command:
+        cmd: ip link set {{ iface }} mtu {{ mtu }}
+      changed_when: false
+      failed_when: false
