@@ -301,8 +301,8 @@ Measure server-side Gbps in (output: `Servers: ... Gbps in ...`).
 
 **Result** (2026-07-06, default 20 queues): **12.9 Gbps** (56% of target).
 Reproduced on fresh reboot with default 20 queues. The shortfall vs paper's
-23 Gbps is a
-real bug, not a core-count penalty (same HW). RTT P50 ~2.1ms. `--client-max 2`→10.9 Gbps
+23 Gbps is a real bug, not a core-count penalty (same HW). RTT P50 ~2.1ms.
+`--client-max 2`→10.9 Gbps
 (worse), `--client-max 4`→10.6 Gbps then collapse, `--client-max 64`→10.57 Gbps
 burst then stall (BPF grant overwhelmed at 448 concurrent RPCs).
 
@@ -398,8 +398,8 @@ Output: `Servers: <Kops> Kops/sec` (aggregate across all 7 servers).
 **Result** (2026-07-06, default 20 queues): **~1120 Kops/sec** client steady
 (34% of 3.3 Mops target). RTT P50 ~217µs (stable).
 Per-server breakdown: ~160 Kops/sec each. Same HW as paper — gap is NOT core
-count and NOT mk dispatch (Homa data is app
-fastpath, see Key findings); real bottleneck is per-app-thread polling rate +
+count and NOT mk dispatch (Homa data is app fastpath, see Key findings);
+real bottleneck is per-app-thread polling rate +
 XDP_GEN + BPF RPC-map contention.
 
 ### 7–12. eTran - Homa | P50/P99 tail latency slowdown, W2–W5 | 10-Node Cluster

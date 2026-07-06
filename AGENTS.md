@@ -123,8 +123,8 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
   grants at `--ports > 4` still trigger buffer-pool slab assertion under heavy
   traffic. Clients `--ports 1 --client-max 1`. CP_CPU=19 internally pins mk
   to core 19 (HT sibling of core 9); server pinned to cores 0-7 gives ~13 Gbps.
-  Bottleneck = Homa
-  grant dispatch (per-CPU XDP_GEN state), so adding ports does NOT help.
+   Bottleneck = Homa grant dispatch (per-CPU XDP_GEN state), so adding ports
+   does NOT help.
 - Metric 4: servers default ports, client `--ports 7 --client-max 1` (sweet spot for 10-core)
 - Metric 1-2: 2 nodes only
 - Metric 5: server `--ports 7` (32B safe from buffer-pool crash), clients

@@ -3,7 +3,7 @@
 This document collects the metrics, baseline configurations, expected performance values, and relative benchmark ratios presented in the **eTran: Extensible Kernel Transport with eBPF** paper (NSDI '25).
 
 Use these target values and formulas to verify and reproduce the evaluations described in the paper. An empty column/cell has been provided in each table for you to record your own measured values.
-\
+
 **See `eTran_reproduction_metrics_runbook.md` for current measured values.**
 
 ---
