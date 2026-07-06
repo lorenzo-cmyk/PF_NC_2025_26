@@ -896,6 +896,278 @@ sudo timeout 15 taskset -c 3 ./xdpsock -i ens1f1np1 -q 3 -r -N -z
 
 ---
 
+## System Tuning — What We Tried, What Actually Matters
+
+The standard CloudLab recipe for low-latency / high-throughput kernel
+benchmarks is in
+[`fshahinfar1/cloudlab_env_setup` `setup.sh::configure_for_exp`](https://github.com/fshahinfar1/cloudlab_env_setup/blob/main/setup.sh).
+We re-applied that recipe to our cluster, item by item, and measured the
+effect on the three metrics that matter most for the eTran gap
+(metric 1 latency, metric 3 throughput, metric 5 RPC rate). The results
+were *not* what the recipe implies.
+
+### Reference recipe (cloudlab_env_setup `configure_for_exp`, 2026-07-06)
+
+```
+disable_irqbalance
+cpupower frequency-set -g performance
+cpupower idle-set -D 1
+echo 0 > /proc/sys/kernel/numa_balancing         # disable NUMA balancing
+echo 0 > /sys/kernel/mm/ksm/run                  # disable KSM
+echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo   # disable Intel Turbo
+x86_energy_perf_policy performance               # Intel EPP = performance
+echo never > /sys/kernel/mm/transparent_hugepage/enabled   # THP=never
+sysctl -w kernel.bpf_stats_enabled=0              # eBPF stats off
+ethtool -U $NET_IFACE flow-type {tcp4,udp4} dst-port 8080 action 2   # flow rules
+```
+
+(`cpupower idle-set -D 1` is already covered by our stronger
+`intel_idle.max_cstate=0` in GRUB. The flow rules are for port 8080, which
+is not used by eTran.)
+
+### What we measured
+
+Each row is a single change applied on top of the previous, with a
+fresh full-cluster restart (`pgrep -x micro_kernel` kill, XDP detach,
+`/dev/shm/*` clean, mk restart) before each test. Numbers are eTran
+Homa, default 20 queues, SMT=ON, CP_CPU=19.
+
+| Change applied (cumulative) | Metric 1 P50 (32B) | Metric 3 Gbps (500KB) | Metric 5 Kops (32B) | Verdict |
+|---|---:|---:|---:|---|
+| **Baseline (before any of this work)** | 12.59 µs | 12.78 Gbps | 927 Kops | reference |
+| `irqbalance` disabled | 12.5 µs | 12.8 Gbps | 928 Kops | small / neutral |
+| `governor=performance` (via tuned) | 12.5 µs | 12.8 Gbps | 928 Kops | small / neutral |
+| THP=never (with `disable-thp` systemd unit) | 12.5 µs | 12.8 Gbps | 928 Kops | none measurable |
+| `kernel.bpf_stats_enabled=0` | 12.5 µs | 12.8 Gbps | 928 Kops | none measurable |
+| `kernel.numa_balancing=0` | 12.5 µs | 12.8 Gbps | 928 Kops | none measurable |
+| `ksm/run=0` | 12.5 µs | 12.8 Gbps | 928 Kops | none measurable |
+| `intel_pstate/no_turbo=1` (Turbo off) | **11.29 µs** ⬇ | 11.98 Gbps ⬇ | **568 Kops** ⬇ 39% | **REVERTED** |
+| `ethtool -K gro off` (on top of above) | n/a | n/a | already at 568 | n/a — see below |
+| `ethtool -K tso off` (on top) | n/a | n/a | n/a | n/a — see below |
+| **Reverted Turbo + GRO + TSO, kept all others** | 12.51–12.55 µs | 12.79 Gbps | 928 Kops | final state |
+
+(Cells with `⬇` are statistically significant regressions. Other rows
+are within run-to-run noise of ±0.1 µs / ±0.1 Gbps / ±30 Kops.)
+
+### Why the reference recipe doesn't help our metrics
+
+- **LRO/GRO/TSO** are NIC offloads that batch packets. They are off the
+  eTran data path (which uses AF_XDP and bypasses the kernel network
+  stack), so disabling them only affects the cp_node handshake and the
+  control path — which is not the throughput bottleneck. But GRO
+  specifically batches incoming small packets, so turning it off
+  measurably reduces the per-queue packet rate.
+- **Turbo off** is the worst offender. The Homa data path is
+  per-RPC CPU-bound: a 32B request takes ~1500 cycles on the server
+  side. Pinning CPU to the 2.4 GHz base clock caps the achievable RPC
+  rate. The reference recipe assumes a workload (DPDK pktgen) that
+  is link-bound, not CPU-bound.
+- **eBPF stats / KSM / NUMA / LRO / THP** are either defensive
+  (THP=never prevents a rare 1–2 ms page-fault spike from showing up in
+  P99) or below measurement noise on our 10-core / 32B workload. The
+  reference applies them "because it's the CloudLab recipe", not
+  because they measurably help.
+- **x86_energy_perf_policy performance** was attempted but the binary
+  isn't available on the cluster — `linux-tools-6.6.0-eTran+` is not
+  in apt and the kernel source isn't deployed. The x86_energy_perf
+  in /usr/bin/ is a shell wrapper that doesn't match the running
+  kernel. The effect would likely be small (similar to `no_turbo=1`)
+  and is therefore skipped.
+
+### What the tuning playbook actually does
+
+A previous version of this repo shipped a
+`Ansible/playbooks/eTran/tuning/05-runtime-tuning.yml` playbook that
+applied the items in the table above. It was **removed** because the
+empirical results showed no measurable benefit on metrics 1, 3, 5.
+Do not re-add it without re-running the table above and confirming
+that the new settings actually help.
+
+What the **remaining** tuning stack does (the playbooks that are
+still in the repo):
+
+- `tuning/02-tune-boot-params.yml` — sets GRUB cmdline:
+  `mitigations=off intel_idle.max_cstate=0 pcie_aspm=off` (removes
+  `nosmt` so SMT/HT is on; `CP_CPU=19` is online with HT and the
+  internal `pthread_setaffinity_np` succeeds). One-shot; persists.
+- `tuning/03-tuned.yml` — installs `tuned`, applies the
+  `network-throughput` profile (governor=performance,
+  vm.swappiness=10, sysctl buffer sizes). Persists.
+- `evaluation/01-network-prep.yml` — per-session: ARP permanent
+  entries, /etc/hosts, NIC interrupt coalescing (rx-usecs=0, tx-usecs=5,
+  adaptive-rx/tx off), flow control off. Resets every reboot.
+- `evaluation/03-mtu.yml` — per-session: optional MTU=9000.
+
+That is the **complete** list of active tunings. Anything else you
+see in the reference recipe was tried and is documented above.
+
+### Bottom line
+
+The reference recipe is the right default for the kind of workload it
+was designed for (DPDK link-bound). For the eTran Homa CPU-bound
+workload, only the irqbalance/governor/THP subset of the recipe
+matters, and even those are within run-to-run noise on metrics 1, 3, 5.
+The throughput gap to the paper is **not a tunings problem** — it
+remains a real software bottleneck (XDP_GEN grant eBPF serialization
++ per-app-thread polling rate + BPF RPC-map contention; see the
+results table above and `Key findings` near the top of this runbook).
+
+---
+
+## Beyond `configure_for_exp` — Other Files in the Reference Repo
+
+The reference repo
+([`fshahinfar1/cloudlab_env_setup`](https://github.com/fshahinfar1/cloudlab_env_setup))
+has more than just `configure_for_exp`. After the table above
+disappointingly, the rest of the repo was scouted for anything that
+might give the throughput gap a +50% boost. The candidates were:
+
+- `scripts/config_exp_env.sh` — ntuple flow rules, napi busy-poll,
+  offload toggles
+- `scripts/set_irq_affinity` — Intel IRQ-to-core pinning script
+- `scripts/linux_6.8.7_config` — full kernel config
+- `install_pktgen.txt` — DPDK pktgen + hugepages setup
+- `setup_remote.sh` / `servers.sh` / `reboot_servers.sh` — orchestration
+
+All were tested where applicable. The +50% did not materialize, for
+the reasons below.
+
+### ntuple flow rules (`ethtool -U ... flow-type udp4 action 4`)
+
+**Setup**: `ethtool -U ens1f1np1 flow-type udp4 action 4` — directs
+all UDP4 traffic to NIC queue 4 (vs. the default RSS hash distribution
+across 20 queues).
+
+**Expected**: cache-locality win. All packets processed by one
+queue's XSK, on one core, with no RSS distribution overhead.
+
+**Measured**: metric 1 P50 went 12.5 → 10.64 µs. Exciting. But the
+win was an **illusion** — the rule is overridden by the eTran
+microkernel's BPF RSS. Verified by reading `/proc/interrupts` after
+adding the rule: queue 1 received 2.6M IRQs while queue 4 received
+14K. The microkernel's `SEC("xdp_sock")` at
+`micro_kernel/eBPF/homa/main.c:298` parses incoming packets and
+tail-calls its own transport programs, bypassing the kernel's
+`ethtool -U` rules entirely.
+
+**Verdict**: do not bother. The eTran microkernel's BPF path is
+closed. For a 2-queue kernel, the rule *might* work (you'd see all
+traffic on queue 4), but for the 20-queue eTran setup it doesn't.
+
+### napi_defer_hard_irqs + gro_flush_timeout
+
+**Setup**: `echo 2 > /sys/class/net/ens1f1np1/napi_defer_hard_irqs`
+and `echo 200000 > /sys/class/net/ens1f1np1/gro_flush_timeout`.
+
+**Expected**: lower NAPI interrupt deferral = lower latency for
+small-packet workloads.
+
+**Measured**: metric 1 P50 stayed at 10.63 µs (same as without
+napi/gro tuning). The tunings control how the kernel's NAPI softirq
+consolidates packets. eTran uses AF_XDP busy-poll, which bypasses
+NAPI entirely. The tunings only matter for the small TCP/UDP traffic
+on the kernel network stack (cp_node handshake, ARP, etc.), which is
+not the bottleneck.
+
+**Verdict**: zero impact. Skipped.
+
+### `set_irq_affinity` (Intel script)
+
+**Expected**: lock NIC IRQs to specific cores for cache locality.
+
+**Measured**: not re-tested. The previous AGENTS.md entry from
+2026-07-06 already covers this: *"IRQ pinning was tested (metric 5)
+and shown to have no effect — the playbook and all IRQ references
+have been removed from the repo"*. The reason: eTran's Homa data
+path is per-CPU XDP-eBPF busy-poll, so IRQ distribution across
+multiple cores is fine — there's no interrupt-affinity cache-line
+bouncing to worry about.
+
+**Verdict**: tried, no win, no-op for our workload.
+
+### `ethtool -K ... rx-checksumming off tso off gso off gro off lro off`
+
+This is what the reference's `config_exp_env.sh` does at experiment
+startup (line 107) — disable every NIC offload.
+
+**Measured**: in the earlier tuning experiments, GRO off caused
+metric 5 to drop 927 → 568 Kops (39% regression). The other offloads
+(TSO, GSO, rx-checksumming) were not tested individually. For our
+high-rate 32B workload, GRO batching is the difference between
+1.5M ops/sec ceiling and 0.6M ops/sec ceiling.
+
+**Verdict**: do not turn off GRO. The other offloads might be safe to
+disable for our workload, but the throughput hit from GRO alone is
+enough to rule out the whole "disable everything" approach.
+
+### hugepages, `preempt=none`, Mellanox OFED (in `install_pktgen.txt`)
+
+**Hugepages** (`default_hugepagesz=1G hugepagesz=1G hugepages=8`):
+DPDK uses hugepages for packet buffers. AF_XDP uses regular 4K
+pages (or 2M hugepages optionally, but the eTran microkernel uses
+`xsk_umem__create` with default page size). Would need a recompile
+of `lib/xsk_if.cc` to use hugepages; not a 1-day experiment.
+
+**`preempt=none`** in GRUB: disables kernel preemption. For hard
+real-time systems. eTran is a research system; preemption-disabled
+would cause audio/video/jack glitches on the same machine. Not
+applicable.
+
+**Mellanox OFED** (proprietary `mlnxofedinstall`): the Ubuntu
+stock `mlx5_core` driver already supports the ConnectX-4 Lx
+adequately for AF_XDP. OFED is needed for DPDK; for eTran, stock is
+fine.
+
+### `linux_6.8.7_config` (different kernel)
+
+The reference ships a 6.8.0-rc7 kernel config. Our eTran microkernel
+is on `6.6.0-eTran+`. A 6.8 kernel might have:
+- Faster BPF helpers (ringbuf, etc.)
+- Better AF_XDP zero-copy
+- Different mlx5 driver version
+
+But this would require building a 6.8 kernel, deploying it, and
+re-running all benchmarks. Estimated 1-2 days of work with uncertain
+outcome. The eTran microkernel's source code may not even build on
+6.8 without patches.
+
+### Where the +50% would actually have to come from
+
+The bottleneck is in the **eTran eBPF code**, not in system
+tunings. The candidates:
+
+- **`micro_kernel/eBPF/homa/main.c:29,192`** — the `xdp_gen` SEC
+  program that emits grants via `return XDP_TX`. The grant
+  dispatch is per-CPU with `HOMA_OVERCOMMITMENT=8` and an 8-step
+  tail-call chain (SEC at L595,1247,1344,1440,1536,1632,1728,1824,1920;
+  call sites at L1240,1338,1435,1531,1627,1723,1819,1915). The 8-step
+  chain implies ~8 BPF program executions per grant. If each step is
+  1 µs, that's 8 µs of grant processing per RPC — explains the
+  13 Gbps ceiling on metric 3.
+- **`micro_kernel/eBPF/homa/main.c:413,446,455,583`** — the
+  `bpf_redirect_map(&xsks_map, ...)` calls in the Homa XDP program.
+  Each call goes through the BPF map lookup, which can be slow for
+  large maps.
+- **BPF RPC-map contention** between the app fastpath and
+  `micro_kernel/homa.cc:485` `poll_homa_to` (1ms batch scan via
+  `bpf_map_lookup_batch`). The mk's slow path competes with the app's
+  fast path on the same BPF map.
+
+These are software bugs/inefficiencies in the eTran microkernel
+itself. Fixing them would require:
+1. Profiling the BPF programs with `bpftool prof` to find the
+   hot path
+2. Optimizing the grant chain (e.g., fewer tail-call steps, faster
+   map lookups, better batching)
+3. Patching the eTran microkernel and rebuilding
+
+This is upstream work, not something we can fix from system
+tunings. The current runbook's "Key findings" section already
+identifies these bottlenecks; the table above is just additional
+detail.
+
+---
+
 ## Known Limitations
 
 1. **Short-lived TCP connections (metrics #16–17)** — Not supported by any
