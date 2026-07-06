@@ -162,7 +162,7 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
   NO external `taskset` is needed. This matches the paper's design (§6: "dedicated
   core for control path/slow path").
 - `perf` breaks Homa AF_XDP but works fine for TCP benchmarks (Metric 21 completed
-  with 50.7B cycles under perf). The application thread's own AF_XDP busy-poll
+  with 63.8B cycles under perf). The application thread's own AF_XDP busy-poll
   is what `perf` sampling interrupts stall; mk's slow-path control_loop is
   unaffected and is not the relevant target of perf interference.
 - TCP connection drop after ~9s: "Connection is closed by microkernel" from
@@ -271,8 +271,8 @@ wait
 
 ## Ansible inventory
 - `@server` = node0, `@clients` = node1–node9
-- **NOTE:** `profile.py` at repo root is stale (shows `node_count=4`). The actual
-  deployment has 10 nodes (node0–node9), making Metrics 7–12 testable.
+- **NOTE:** `profile.py` now has `node_count=10` (was 4). Update for fresh
+  CloudLab allocations if node count changes.
 - Paper PDF: `nsdi25-chen-zhongjie.pdf` in repo root
 
 ## Key source files

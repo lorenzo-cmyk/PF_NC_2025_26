@@ -10,12 +10,12 @@
 
 | # | Metric | Our Result | Paper Target | % | Bottleneck |
 |---|--------|-----------|-------------|---|-----------|
-| 1 | 32B latency (P50) | **12.59 µs** | 11.8 µs | **93%** | Same HW as paper; 7% gap under investigation (not NUMA) |
-| 2 | 1MB throughput | **16.6 Gbps** | 17.7 Gbps | **94%** | Same HW as paper; ~6% gap under investigation |
-| 3 | 7-clients→1-server 500KB | **~12.9 Gbps** server-side | 23.0 Gbps | **56%** | Homa grant/egress XDP_GEN dispatch path saturates at ~13 Gbps regardless of `--ports`; real bug, NOT core count (same HW as paper) |
-| 4 | 1-client→7-servers 500KB | **~19.5 Gbps** client-side | 22.7 Gbps | **86%** | NOT NIC (paper hit 22.7 on same 25G link); XDP_GEN grant pacing + per-app-thread send rate on the client |
-| 5 | Client RPC rate, 32B (7:1) | **~927 Kops** server steady | 2.9 Mops | **32%** | Per-app-thread polling rate + BPF map contention (mk is NOT on Homa data fastpath — see Key findings) |
-| 6 | Server RPC rate, 32B (1:7) | **~1120 Kops** client steady | 3.3 Mops | **34%** | Per-app-thread polling rate + BPF map contention (mk is NOT on Homa data fastpath — see Key findings) |
+| 1 | 32B latency (P50) | **12.59 µs** (2026-07-06, def. 20 queues) | 11.8 µs | **93%** | Same HW as paper; 7% gap under investigation (not NUMA) |
+| 2 | 1MB throughput | **16.6 Gbps** (2026-07-06, def. 20 queues) | 17.7 Gbps | **94%** | Same HW as paper; ~6% gap under investigation |
+| 3 | 7-clients→1-server 500KB | **~12.9 Gbps** server-side (2026-07-06, def. 20 queues) | 23.0 Gbps | **56%** | Homa grant/egress XDP_GEN dispatch path saturates at ~13 Gbps regardless of `--ports`; real bug, NOT core count (same HW as paper) |
+| 4 | 1-client→7-servers 500KB | **~19.5 Gbps** client-side (2026-07-06, def. 20 queues) | 22.7 Gbps | **86%** | NOT NIC (paper hit 22.7 on same 25G link); XDP_GEN grant pacing + per-app-thread send rate on the client |
+| 5 | Client RPC rate, 32B (7:1) | **~927 Kops** server steady (2026-07-06, def. 20 queues) | 2.9 Mops | **32%** | Per-app-thread polling rate + BPF map contention (mk is NOT on Homa data fastpath — see Key findings) |
+| 6 | Server RPC rate, 32B (1:7) | **~1120 Kops** client steady (2026-07-06, def. 20 queues) | 3.3 Mops | **34%** | Per-app-thread polling rate + BPF map contention (mk is NOT on Homa data fastpath — see Key findings) |
 | 7 | P99 slowdown W2/W3 (short-msg) | **P99=1344 µs** (W2), **1428 µs** (W3) | 3.9–7.5× slowdown vs Linux | — | eTran RTTs only (no Linux-Homa baseline) |
 | 8 | P50 slowdown W2/W3 (short-msg) | **P50=109 µs** (W2), **115 µs** (W3) | 1.4–3.6× slowdown vs Linux | — | eTran RTTs only (no Linux-Homa baseline) |
 | 9 | RTT P50 shortest-10% W4 | **2848 µs** (eTran raw) | 4.1× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
@@ -26,8 +26,8 @@
 | 14 | TCP 2KB throughput | **~11.79 Gbps**, ~719 Kops (single-threaded, default 20 queues) | 0.87× TAS | — | Raw number captured; ratio needs TAS baseline |
 | 15 | TCP 1K persistent conns, 64B | **~1129 Kops peak / ~655 K steady aggregate** (10-thr server, 5 clients × 200 conns, default 20 queues) | 2.26× Linux | — | Connection drop after ~9s limits window. Per-client steady ~160-170 Kops each. Env vars must be inside `script -q -c` argument (not as prefix) |
 | 18 | TCP KV throughput | **~1.0 Mops peak / ~0.73 Mops steady aggregate** (5 clients, 4 threads, 16 pending, default 20 queues) | 2.4-4.8× Linux | — | Raw number captured; ratio needs Linux-TCP baseline |
-| 19 | TCP KV P50 latency | **14 µs** | 17.2 µs | **122%** | Beats paper target |
-| 20 | TCP KV P99 latency | **16 µs** | 27.5 µs | **172%** | Beats paper target |
+| 19 | TCP KV P50 latency | **14 µs** (2026-07-06, def. 20 queues) | 17.2 µs | **122%** | Beats paper target |
+| 20 | TCP KV P99 latency | **16 µs** (2026-07-06, def. 20 queues) | 27.5 µs | **172%** | Beats paper target |
 | 21 | TCP CPU cycles/req | **~2.9 kcycles** (2026-07-06, ~880 Kops, 63.8B cycles) | 4.37 kcycles | — | Client-side only (includes idle epoll_wait); paper is server under NAPI stress |
 | 22 | Homa CPU cycles/req | **~1357 kcycles** (2026-07-06, 50.9B cycles, 1MB) | 5.48 kcycles | — | AF_XDP busy-poll inflation (99.6% idle); active ~5 kcycles matches paper |
 
@@ -219,8 +219,8 @@ timeout 15 env ETRAN_PROTO=homa ./cp_node client \
 Output every 1s: `Clients: <Kops> Kops/sec, <gbps> Gbps out, ..., RTT (us) P50 <p50> P99 <p99> P99.9 <p99.9>`
 Read P50 for the metric.
 
-**Result**: P50 **12.59 µs** (93% of target). P99 14.85 µs. Stable across measurements.
-HT-on, no taskset, CP_CPU=19 working, default 20 queues. Small vs paper; cause under
+**Result** (2026-07-06, default 20 queues): P50 **12.59 µs** (93% of target).
+P99 14.85 µs. Stable across measurements. Small vs paper; cause under
 investigation (NOT a NUMA/socket gap — paper used identical xl170 10-core
 single-socket hardware).
 
@@ -251,9 +251,10 @@ Output: `Clients: ... Gbps out ...` — read Gbps out for the metric.
 > `--client-max 1 --ports 1` are defaults — omitted for clarity. `--gbps 0` (default)
 > means "send continuously" (closed-loop back-to-back).
 
-**Result**: **16.6 Gbps** (94% of target). Stable across 15+ measurements.
-RTT P50 442 µs, stability within ±0.1 Gbps. Clean shm between metrics is
-critical — stale BPF state causes stalls with 0 completions.
+**Result** (2026-07-06, default 20 queues): **16.6 Gbps** (94% of target).
+Stable across 15+ measurements. RTT P50 442 µs, stability within ±0.1 Gbps.
+Clean shm between metrics is critical — stale BPF state causes stalls with 0
+completions.
 
 ### 3. eTran - Homa | Multi-threaded server throughput, 500KB, 7 clients | 23.0 Gbps | 8-Node
 
@@ -298,8 +299,9 @@ Measure server-side Gbps in (output: `Servers: ... Gbps in ...`).
 > `--ports > 4` buffer-pool crash capping server parallelism. Use
 > `--client-max 1 --ports 1`.
 
-**Result**: **12.9 Gbps** (56% of target). Reproduced on fresh reboot with default
-20 queues, no taskset, no IRQ pinning. The shortfall vs paper's 23 Gbps is a
+**Result** (2026-07-06, default 20 queues): **12.9 Gbps** (56% of target).
+Reproduced on fresh reboot with default 20 queues. The shortfall vs paper's
+23 Gbps is a
 real bug, not a core-count penalty (same HW). RTT P50 ~2.1ms. `--client-max 2`→10.9 Gbps
 (worse), `--client-max 4`→10.6 Gbps then collapse, `--client-max 64`→10.57 Gbps
 burst then stall (BPF grant overwhelmed at 448 concurrent RPCs).
@@ -327,8 +329,9 @@ Measure client-side Gbps out.
 > `--client-max 1`: 1 outstanding per port, 7 total. Higher concurrency stalls
 > (e.g. `--client-max 64` → 448 concurrent RPCs, CPU contention on 10 cores).
 
-**Result**: **19.5 Gbps** (86% of target). Bottleneck under investigation —
-NOT the NIC (paper reached 22.7 Gbps on the same 25G link). NOT mk dispatch:
+**Result** (2026-07-06, default 20 queues): **19.5 Gbps** (86% of target).
+Bottleneck under investigation — NOT the NIC (paper reached 22.7 Gbps on the
+same 25G link). NOT mk dispatch:
 Homa data is fastpath-redirected by XDP to the app's XSK; the client's 7 app
 threads send directly via `xsk_ring_prod`. Likely candidates are the XDP_GEN
 grant pacing eBPF overhead on the receive side and the per-app-thread send
@@ -362,10 +365,10 @@ Output: `Clients: <Kops> Kops/sec` — aggregate across all 7 clients for Mops.
 > on the Homa data fastpath — see Key findings). The cap is the per-app-thread
 > polling rate and BPF map contention between the app fastpath and mk's 1ms
 > `poll_homa_to` timeout scan. Full micro_kernel + shm restart required
-> between runs. With HT-on and CP_CPU=19 working (no taskset), IRQ pinning was
-> tested and shown to have no effect — the playbook has been removed.
+> between runs. IRQ pinning was tested and shown to have no effect.
 > 
-> **Result**: **~927 Kops/sec** server steady (32% of 2.9 Mops target).
+> **Result** (2026-07-06, default 20 queues): **~927 Kops/sec** server steady
+> (32% of 2.9 Mops target).
 > RTT P50 ~400-460µs across clients. Same HW as paper — the 3.1× gap is NOT core
 > count and NOT mk dispatch; it is per-app-thread polling/XDP-redirect overhead plus
 > BPF RPC-map contention. See Key findings.
@@ -392,9 +395,10 @@ Output: `Servers: <Kops> Kops/sec` (aggregate across all 7 servers).
 > produced 0 completions. Full `pkill -9 micro_kernel; rm -f /dev/shm/*; restart`
 > on ALL nodes is mandatory. Use `--ports 7 --client-max 256` (not --ports 1).
 
-**Result**: **~1120 Kops/sec** client steady (34% of 3.3 Mops target). RTT P50 ~217µs (stable).
-Per-server breakdown: ~160 Kops/sec each. Ran with HT-on, no taskset, CP_CPU=19 working.
-Same HW as paper — gap is NOT core count and NOT mk dispatch (Homa data is app
+**Result** (2026-07-06, default 20 queues): **~1120 Kops/sec** client steady
+(34% of 3.3 Mops target). RTT P50 ~217µs (stable).
+Per-server breakdown: ~160 Kops/sec each. Same HW as paper — gap is NOT core
+count and NOT mk dispatch (Homa data is app
 fastpath, see Key findings); real bottleneck is per-app-thread polling rate +
 XDP_GEN + BPF RPC-map contention.
 
@@ -947,7 +951,7 @@ sudo timeout 15 taskset -c 3 ./xdpsock -i ens1f1np1 -q 3 -r -N -z
 17. **`perf` breaks Homa AF_XDP but works for TCP** — `perf stat` and `perf record`
      insert sampling interrupts that stall Homa's time-sensitive AF_XDP busy-poll
      loop (0 completions under perf). However, TCP benchmarks work fine under perf
-     (Metric 21 completed with 50.7B cycles, 75.5B instructions over 20s). The
+      (Metric 21 completed with 63.8B cycles, 94.8B instructions over 25s). The
      microkernel's AF_XDP polling on a separate thread is not disrupted by perf
      on the application thread. Building kernel-matching `perf` from eTran kernel
      source requires `make NO_JEVENTS=1 NO_LIBTRACEEVENT=1 NO_LIBPFM4=1`.

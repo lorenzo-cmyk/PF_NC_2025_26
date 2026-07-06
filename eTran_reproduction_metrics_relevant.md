@@ -2,6 +2,8 @@
 
 This document contains only **eTran-specific metrics** with **Medium and High** reproduction priority, extracted from the full metric list. Linux/TAS-only baselines and Low-priority entries have been removed.
 
+**See `eTran_reproduction_metrics_runbook.md` for current measured values.**
+
 ---
 
 ## 1. Primary Metrics — eTran
