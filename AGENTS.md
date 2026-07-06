@@ -118,13 +118,14 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
 - Metrics 1: NO `--one-way` (32B echo per paper §4.2)
 - Metrics 2-4, 7-12, 22: YES `--one-way` (large messages need small response)
 - Metrics 2: `--client-max 1 --ports 1` (single-stream back-to-back)
-- Metric 3: server `--ports 4` (or 5/7/10 — 32B RPCs safe from buffer-pool
-  crash; throughput is identical ~13 Gbps regardless of port count). Homa
-  grants at `--ports > 4` still trigger buffer-pool slab assertion under heavy
-  traffic. Clients `--ports 1 --client-max 1`. CP_CPU=19 internally pins mk
-  to core 19 (HT sibling of core 9); server pinned to cores 0-7 gives ~13 Gbps.
-   Bottleneck = Homa grant dispatch (per-CPU XDP_GEN state), so adding ports
-   does NOT help.
+- Metric 3: server `--ports 4` (or 5/7 — verified equivalent at ~12.8 Gbps;
+  10 is WORSE at 8 Gbps because the 1-thread client can only fill 7 of 10
+  server ports). 500KB Homa grants at `--ports 5/7/10` do **NOT** crash the
+  buffer pool with the BPF XDP_EGRESS patch applied (verified clean 2026-07-06).
+  The earlier "max 4 ports" caveat is **stale** — the BPF patch fixed it.
+  Clients `--ports 1 --client-max 1`. CP_CPU=19 internally pins mk
+  to core 19 (HT sibling of core 9). Bottleneck = Homa grant dispatch
+  (per-CPU XDP_GEN state), so adding server ports does NOT help.
 - Metric 4: servers default ports, client `--ports 7 --client-max 1` (sweet spot for 10-core)
 - Metric 1-2: 2 nodes only
 - Metric 5: server `--ports 7` (32B safe from buffer-pool crash), clients
@@ -136,16 +137,20 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
   Requires `micro_kernel` restart between each workload (4 total).
   Results (2026-07-06): W2 P50=109 µs P99=1344 µs (even load ~430 Kops/node);
   W3 P50=115 µs P99=1428 µs; W4 shortest-10% P50=2848 µs; W5 shortest-10% P50=14530 µs.
-  Linux-Homa baseline postponed. `--server-ports 4` max before buffer pool crash.
+  Linux-Homa baseline postponed. `--server-ports 4` (operational, matches the
+  metric 3 invocation — not a hard cap; could try 5/7, see metric 3 notes).
 - Metrics 13-21: TCP benchmarks, use `script -q -c` over SSH for visible output
 - Metric 15: stagger clients 0.5s apart to avoid overwhelming server
 - Metrics 19-20: KV latency beats paper targets (14 vs 17.2 µs P50, 16 vs 27.5 µs P99)
 
 ## Known issues
 - `--workload 1000000` stalls — use `999999` (HOMA_MAX_MESSAGE_LENGTH off-by-one)
-- Server `--ports > 4` crashes buffer pool (`nr_slabs_avail` assertion) — only
-  triggers under heavy traffic with Homa grants. `--ports 5/7/10` for 32B RPCs
-  (no grants) works fine; verify before relying on this note.
+- Server `--ports > 4` with 500KB Homa grants: **no longer crashes** with the BPF
+  XDP_EGRESS patch applied (verified 2026-07-06: server `--ports 5/7/10` all run
+  cleanly at ~12.8 Gbps for 32s, no asserts, no dmesg errors). The earlier
+  "max 4 ports" claim was stale. The crash may still trigger on a fresh eTran
+  clone without the patch — re-apply `micro_kernel/eBPF/homa/main.c:235-248`
+  before trusting this note.
 - Multi-client (>200 concurrent RPCs) overwhelms BPF grant mechanism
 - **TCP benchmarks now work** — the earlier SIGABRT was fixed by the BPF XDP_EGRESS
   patch (it affected TCP egress paths too, not just Homa grants). Metrics 13-15 and
@@ -193,8 +198,8 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
   Real Homa bottlenecks to investigate: XDP_GEN grant eBPF serialization,
   per-app-thread polling rate, BPF RPC-map contention between the app
   fastpath and mk's 1ms `poll_homa_to` batch scan. IRQ pinning was tested
-  (metric 5) and showed no effect. Plus the `--ports > 4` buffer-pool slab
-  crash that caps server parallelism.
+  (metric 5) and showed no effect. Server `--ports 4/5/7` all hit the same
+  ~13 Gbps ceiling (verified 2026-07-06 — server parallelism is NOT the cap).
 - flexkvs_server hardcodes port 11211; flexkvs_bench `--time`/`--warmup`/`--cooldown`
   are stored but never enforced — always wrap in `timeout`.
 - **Micro_kernel threading model**: `ps -L` shows only 3 mk threads (main,
@@ -302,7 +307,7 @@ wait
 - `micro_kernel/homa.cc:485` — `poll_homa_to` (1ms batch scan of the BPF RPC map for zombies/retransmits; L502 `bpf_map_lookup_batch`)
 
 ### Buffer pool / constants
-- `common/xskbp/xsk_buffer_pool.h:33` — `umem_num_frames=64*XSK_RING_PROD__DEFAULT_NUM_DESCS`; L39 `buffers_per_slab=2*XSK_RING_PROD__DEFAULT_NUM_DESCS`; L70/L73 `nr_slabs` / `nr_slabs_avail` (the counters that assert at `--ports > 4` under heavy Homa-grant traffic)
+- `common/xskbp/xsk_buffer_pool.h:33` — `umem_num_frames=64*XSK_RING_PROD__DEFAULT_NUM_DESCS`; L39 `buffers_per_slab=2*XSK_RING_PROD__DEFAULT_NUM_DESCS`; L70/L73 `nr_slabs` / `nr_slabs_avail` (slab counters — the `--ports > 4` crash hypothesis is **refuted 2026-07-06** with the BPF XDP_EGRESS patch; server runs cleanly at 5/7/10 ports)
 - `common/tran_def/homa.h:8` — `HOMA_MAX_MESSAGE_LENGTH = 1000000` (off-by-one: `--workload 1000000` stalls, use `999999`)
 - `common/tran_def/homa.h:10` — `enum homa_packet_type` (DATA/GRANT/RESEND/...)
 

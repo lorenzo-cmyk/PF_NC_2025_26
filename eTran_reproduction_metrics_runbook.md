@@ -12,7 +12,7 @@
 |---|--------|-----------|-------------|---|-----------|
 | 1 | 32B latency (P50) | **12.59 µs** (2026-07-06, def. 20 queues) | 11.8 µs | **93%** | Same HW as paper; 7% gap under investigation (not NUMA) |
 | 2 | 1MB throughput | **16.6 Gbps** (2026-07-06, def. 20 queues) | 17.7 Gbps | **94%** | Same HW as paper; ~6% gap under investigation |
-| 3 | 7-clients→1-server 500KB | **~12.9 Gbps** server-side (2026-07-06, def. 20 queues) | 23.0 Gbps | **56%** | Homa grant/egress XDP_GEN dispatch path saturates at ~13 Gbps regardless of `--ports`; real bug, NOT core count (same HW as paper) |
+| 3 | 7-clients→1-server 500KB | **~12.78 Gbps** server-side (2026-07-06, def. 20 queues) | 23.0 Gbps | **56%** | Homa grant/egress XDP_GEN dispatch path saturates at ~13 Gbps regardless of `--ports` (4/5/7 all hit same ceiling; 10 is worse at 8 Gbps due to client fan-out). Real bug, NOT core count (same HW as paper), NOT server parallelism, NOT buffer pool |
 | 4 | 1-client→7-servers 500KB | **~19.5 Gbps** client-side (2026-07-06, def. 20 queues) | 22.7 Gbps | **86%** | NOT NIC (paper hit 22.7 on same 25G link); XDP_GEN grant pacing + per-app-thread send rate on the client |
 | 5 | Client RPC rate, 32B (7:1) | **~927 Kops** server steady (2026-07-06, def. 20 queues) | 2.9 Mops | **32%** | Per-app-thread polling rate + BPF map contention (mk is NOT on Homa data fastpath — see Key findings) |
 | 6 | Server RPC rate, 32B (1:7) | **~1120 Kops** client steady (2026-07-06, def. 20 queues) | 3.3 Mops | **34%** | Per-app-thread polling rate + BPF map contention (mk is NOT on Homa data fastpath — see Key findings) |
@@ -186,7 +186,7 @@ Verified against `eTran/homa_app/cp_node.cc` and upstream `PlatformLab/HomaModul
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--ports` | int | `1` | Listening ports/threads. **Max 4** (buffer pool crash at >4) |
+| `--ports` | int | `1` | Listening ports/threads. `--ports 5/7` verified safe with BPF XDP_EGRESS patch applied (no buffer-pool assert); `--ports 10` works but throughput drops because 1-thread client can't fill 10 server ports. Use 4 (paper's hint) or any of 4/5/7 — all hit the same ~13 Gbps ceiling |
 | `--first-port` | int | `4000` | Lowest port number |
 
 ### Key semantics
@@ -275,9 +275,14 @@ timeout 30 env ETRAN_PROTO=homa ./cp_node client \
 ```
 Measure server-side Gbps in (output: `Servers: ... Gbps in ...`).
 
-> **`--ports 4`** on server: 4 server threads (max before buffer pool crash at >4).
-> Paper used more threads but eTran's buffer pool asserts `nr_slabs_avail > nr_slabs`
-> with `--ports > 4`. Client uses `--server-ports 4` to target all 4 server ports.
+> **`--ports 4`** on server: 4 server threads. The earlier "max 4" buffer-pool
+> crash claim is **stale** — verified 2026-07-06 that server `--ports 5/7`
+> run cleanly at ~12.8 Gbps (within 1% of `--ports 4`) with the BPF XDP_EGRESS
+> patch applied, no asserts, no dmesg errors. `--ports 10` is worse (~8 Gbps)
+> because the 1-thread client can only fill 7 of 10 server ports; the 8th-10th
+> stay idle. The 13 Gbps ceiling is therefore **not** server parallelism but
+> the XDP_GEN grant dispatch path. Use `--ports 4` (paper's hint) or any of
+> 5/7 — they all hit the same ceiling.
 >
 > **`--workload 500000`**: 500KB (paper's wording). Not 524288 (512KiB).
 >
@@ -295,9 +300,11 @@ Measure server-side Gbps in (output: `Servers: ... Gbps in ...`).
 > concurrency (`--client-max 2`→10.9 Gbps, `--client-max 4`→10.6 Gbps then
 > collapse) degrades due to the BPF grant path, not raw oversubscription.
 > Paper ran on identical xl170 10-core single-socket nodes, so the gap is
-> NOT a core-count deficit; it is the grant-egress-side bug plus the
-> `--ports > 4` buffer-pool crash capping server parallelism. Use
-> `--client-max 1 --ports 1`.
+> NOT a core-count deficit; it is the grant-egress-side bug
+> (XDP_GEN grant dispatch serialization on `HOMA_OVERCOMMITMENT=8` per-CPU
+> state). The earlier hypothesis that `--ports > 4` buffer-pool crash capped
+> server parallelism is **refuted** (see `--ports` sweep above).
+> Use `--client-max 1 --ports 1`.
 
 **Result** (2026-07-06, default 20 queues): **12.9 Gbps** (56% of target).
 Reproduced on fresh reboot with default 20 queues. The shortfall vs paper's
@@ -305,6 +312,19 @@ Reproduced on fresh reboot with default 20 queues. The shortfall vs paper's
 `--client-max 2`→10.9 Gbps
 (worse), `--client-max 4`→10.6 Gbps then collapse, `--client-max 64`→10.57 Gbps
 burst then stall (BPF grant overwhelmed at 448 concurrent RPCs).
+
+**`--ports` sweep on server (2026-07-06, clean restart between each)**:
+| Server `--ports` | Steady Gbps | Peak Gbps | Notes |
+|---:|---:|---:|---|
+| 4 | 12.9 | — | baseline |
+| 5 | 12.78 | 13.77 | no crash |
+| 7 | 12.77 | 12.77 | no crash |
+| 10 | 8.01 | 9.09 | client fan-out limit; 3 ports idle |
+
+4/5/7 are equivalent (within 1% noise). 10 is worse due to client-side
+1-thread fan-out, not server. No buffer-pool asserts at any port count with
+the BPF XDP_EGRESS patch applied. The 13 Gbps ceiling is a real eBPF
+serialization limit, not a server-side resource cap.
 
 ### 4. eTran - Homa | Multi-threaded client throughput, 500KB, 7 servers | 22.7 Gbps | 8-Node
 
@@ -357,7 +377,8 @@ timeout 30 env ETRAN_PROTO=homa ./cp_node client \
 ```
 Output: `Clients: <Kops> Kops/sec` — aggregate across all 7 clients for Mops.
 
-> 32B messages don't trigger the buffer pool crash at `--ports 7` (no grants needed).
+> 32B messages don't need Homa grants (small message fits in unscheduled grant),
+> so the XDP_GEN grant path is idle and no buffer-pool pressure at any port count.
 > `--client-max 64 --ports 1`: 64 outstanding per client node, 1 sending thread.
 > `--ports 1 --client-max 64` per client gives the best result
 > (~927 Kops server steady, 32% of target). Higher `--client-max` or more
@@ -457,7 +478,14 @@ Slowdown = `eTran_RTT / Linux_RTT` (run same workload on stock Linux for baselin
 > **`--both 2`**: node starts as server (4 ports via `--server-ports 4`), waits 2s,
 > then starts client with 4 sending threads (`--ports 4`).
 > **`--id N`**: skips `nodeN` (itself) when building the server address list.
-> **`--server-ports 4`**: max before buffer pool crash (`>4` asserts).
+> **`--server-ports 4`** (matches `--ports 4` for all-to-all workload): The earlier
+> "max 4 / buffer pool crash" claim for the SERVER was based on 500KB RPCs and
+> was **refuted 2026-07-06** (see metric 3 `--ports` sweep). The cap of 4 in
+> W2-W5 is **operational**: it is what the original metric 3 invocation used
+> (`cp_node --server-ports 4 --ports 1 --client-max 1`), not a hard limit.
+> Could try `--server-ports 7 --ports 4` for these workloads, but the
+> all-to-all topology has different traffic shape (mixed message sizes via
+> `w2`/`w3`/`w4`/`w5` CDFs) — verify on a fresh run before changing.
 > **Gbps per workload**: W2=3.2, W3=14, W4=20, W5=20. Using 20 for W2/W3 is WRONG.
 
 #### Collecting individual RTT samples (for W4/W5 shortest-10% filtering)
@@ -854,7 +882,7 @@ sudo timeout 15 taskset -c 3 ./xdpsock -i ens1f1np1 -q 3 -r -N -z
 | File | Key Locations |
 |:--|:--|
 | `common/tran_def/homa.h` | **L8 `HOMA_MAX_MESSAGE_LENGTH = 1000000`** (off-by-one: `--workload 1000000` stalls, use 999999); L10 `enum homa_packet_type` (DATA/GRANT/RESEND/...) |
-| `common/xskbp/xsk_buffer_pool.h` | **L33 `umem_num_frames=64*XSK_RING_PROD__DEFAULT_NUM_DESCS`**; **L39 `buffers_per_slab=2*XSK_RING_PROD__DEFAULT_NUM_DESCS`**; L70 `nr_slabs`, L73 `nr_slabs_avail` — the slab counter that asserts at `--ports > 4` under heavy Homa-grant traffic |
+| `common/xskbp/xsk_buffer_pool.h` | **L33 `umem_num_frames=64*XSK_RING_PROD__DEFAULT_NUM_DESCS`**; **L39 `buffers_per_slab=2*XSK_RING_PROD__DEFAULT_NUM_DESCS`**; L70 `nr_slabs`, L73 `nr_slabs_avail` — slab counters (the `--ports > 4` crash claim was **refuted 2026-07-06**: server `--ports 5/7/10` with 500KB RPCs and the BPF XDP_EGRESS patch applied run cleanly at ~12.8 Gbps; the 13 Gbps ceiling is NOT a slab limit) |
 | `micro_kernel/eBPF/homa/rpc.h` | L1584 `xmit_ctrl_pkt` (used by eBPF grant/ctrl TX); per-RPC state map structures |
 | `micro_kernel/eBPF/homa/pacing.h` | Grant pacing structures (per-CPU `granting_idx`, `nr_grant_candidate`, `finish_grant_choose`) |
 
