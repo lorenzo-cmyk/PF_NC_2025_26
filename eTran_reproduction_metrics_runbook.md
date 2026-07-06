@@ -695,11 +695,12 @@ sudo perf report --stdio --sort=comm,dso,symbol,dso_from,symbol_from
 > The microkernel's AF_XDP busy-poll is unaffected by perf on the application side.
 > For cycle-accurate measurement on the server, run perf stat on the server process.
 
-**Result**: 50.7B cycles, 75.5B instructions (1.49 IPC), 1,741 context-switches,
-2 CPU migrations over 20s at ~885 Kops. Cycles/request ≈ **~2.9 kcycles**
-(client-side only — includes active sending + idle epoll_wait cycles).
-Paper's 4.37 kcycles is server-side under NAPI stress; not directly comparable.
-For a proper measurement, run `perf stat` on the **server** process.
+**Result** (previous session, 20s perf run at ~885 Kops throughput): 50.7B cycles,
+75.5B instructions (1.49 IPC), 1,741 context-switches, 2 CPU migrations.
+Cycles/request ≈ **~2.9 kcycles** (client-side only — includes active sending +
+idle epoll_wait cycles). Paper's 4.37 kcycles is server-side under NAPI stress;
+not directly comparable. Current metric 13 throughput (~970 Kops) would give
+~2.6 kcycles. For a proper measurement, run `perf stat` on the **server** process.
 
 ### 22. eTran - Homa | Total CPU cycles per request | 5.48 kcycles | 2-Node CPU Profiling
 

@@ -118,9 +118,10 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
 - Metrics 1: NO `--one-way` (32B echo per paper §4.2)
 - Metrics 2-4, 7-12, 22: YES `--one-way` (large messages need small response)
 - Metrics 2: `--client-max 1 --ports 1` (single-stream back-to-back)
-- Metric 3: server `--ports 4` (or 5/7/10 — crashing has stopped happening
-  after the XDP_EGRESS patch; throughput is identical ~13 Gbps regardless of
-  port count), clients `--ports 1 --client-max 1`. CP_CPU=19 internally pins mk
+- Metric 3: server `--ports 4` (or 5/7/10 — 32B RPCs safe from buffer-pool
+  crash; throughput is identical ~13 Gbps regardless of port count). Homa
+  grants at `--ports > 4` still trigger buffer-pool slab assertion under heavy
+  traffic. Clients `--ports 1 --client-max 1`. CP_CPU=19 internally pins mk
   to core 19 (HT sibling of core 9); server pinned to cores 0-7 gives ~13 Gbps.
   Bottleneck = Homa
   grant dispatch (per-CPU XDP_GEN state), so adding ports does NOT help.
@@ -229,7 +230,7 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
 
 ## What NOT to do
 - NEVER commit unless explicitly told to. Even if changes look correct — only commit when the user says "commit" or "push".
-- Never use `--queues` on cp_node client — kills throughput (e.g. 1045→86 Kops)
+- Never use `--queues` on cp_node client — kills throughput (e.g. 927→86 Kops)
 - Never use `-b` (busy-poll) on micro_kernel — breaks Homa benchmark
 - Never double `umem_num_frames` — doesn't help, causes overhead
 - Never skip shm cleanup between metrics — causes silent failures

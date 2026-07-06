@@ -11,7 +11,7 @@ pc = portal.Context()
 
 request = pc.makeRequestRSpec()
 
-node_count = 4
+node_count = 10  # actual deployment uses node0-node9
 
 # Node experiment network settings
 node_subnet = "192.168.6."
