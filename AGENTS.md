@@ -2,7 +2,7 @@
 
 ## Ansible evaluation pipeline (must run after EVERY reboot)
 
-Reboot resets: ARP table, /etc/hosts, NIC coalescing, flow control, queue count, IRQ affinity, MTU.
+Reboot resets: ARP table, /etc/hosts, NIC coalescing, flow control, queue count, MTU.
 
 ```bash
 # All ansible-playbook commands run from Ansible/ directory:
@@ -10,22 +10,10 @@ cd Ansible
 
 # Required after every reboot:
 .venv/bin/ansible-playbook playbooks/eTran/evaluation/01-network-prep.yml
-.venv/bin/ansible-playbook playbooks/eTran/evaluation/02-irq-affinity.yml
 .venv/bin/ansible-playbook playbooks/eTran/evaluation/04-verify-network.yml
 
 # Optional: MTU (default 1500, skip for standard runs)
 # .venv/bin/ansible-playbook playbooks/eTran/evaluation/03-mtu.yml --extra-vars 'mtu=9000'
-```
-
-**IRQ affinity (02) details**: There are 2 mlx5 devices on these nodes
-(`0000:07:00.0` and `0000:03:00.1`). The 02-irq-affinity.yml playbook uses
-`grep mlx5_comp /proc/interrupts` which picks up IRQs from BOTH devices.
-The sort-order may interleave them. Always verify the pinning targets the
-correct PCI slot for `ens1f1np1` (`0000:03:00.1`). After running, check:
-```bash
-for irq in $(grep "mlx5_comp@pci:0000:03:00.1" /proc/interrupts | sed 's/^ *//' | cut -d: -f1 | sort -n | head -10); do
-  echo -n "IRQ $irq -> "; cat /proc/irq/$irq/smp_affinity_list
-done
 ```
 
 ## Critical procedure for running benchmarks
@@ -51,10 +39,10 @@ done
 # 3. Start micro_kernel on all involved nodes with screen (no timeout)
 #    NO taskset — CP_CPU=19 (defs.h:26) pins the control_loop to HT sibling
 #    core 19 automatically. This only works with HT ON (the intended design).
-#    -q 10 matches the 10 NIC combined queues. Use `ethtool -l ens1f1np1` to check.
+#    Default 20 queues matches NIC combined=20 (use `ethtool -l ens1f1np1` to check).
 for n in node0 node1 node2 ...; do
   ssh $n "sudo screen -dmS micro_kernel bash -c \
-    'cd /local/eTran/eTran/micro_kernel && exec ./micro_kernel -i ens1f1np1 -q 10'"
+    'cd /local/eTran/eTran/micro_kernel && exec ./micro_kernel -i ens1f1np1'"
 done
 sleep 5
 
@@ -155,12 +143,11 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
   patch (it affected TCP egress paths too, not just Homa grants). Metrics 13-15 and
   18-21 confirmed working.
 - **SMT ON works fine** — the earlier "SMT ON breaks eTran entirely" claim was
-  false. The 0-completions symptom was caused by the old IRQ affinity playbook
-  pinning IRQs to 20 CPUs (all logical cores including HT siblings), which
-  misrouted NIC completions. With the corrected playbook (pin IRQs to physical
-  cores 0-9 only) and HT-on, eTran runs correctly: metric 1 (12.70 µs P50),
-  metric 2 (16.6 Gbps), and metric 5 (1040 Kops) all produce valid results.
+  false. With HT-on, eTran runs correctly: metric 1 (12.70 µs P50),
+  metric 2 (16.6 Gbps), and metric 5 (~990 Kops) all produce valid results.
   HT-on gives a ~8% improvement in metric 5 vs the old taskset-c9 workaround.
+  IRQ pinning does not affect results (tested: pinned 2:1 vs default vs no pin
+  all within noise on metric 5).
 - **CP_CPU=19 internal pin now works** — with HT enabled, core 19 (SMT sibling
   of core 9) is online. The `pthread_setaffinity_np` at `control_plane.cc:1155`
   succeeds for the first time, pinning the mk control_loop to its intended core.
@@ -226,6 +213,7 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
   rebooting the whole cluster.
 
 ## What NOT to do
+- NEVER commit unless explicitly told to. Even if changes look correct — only commit when the user says "commit" or "push".
 - Never use `--queues` on cp_node client — kills throughput (e.g. 1045→86 Kops)
 - Never use `-b` (busy-poll) on micro_kernel — breaks Homa benchmark
 - Never double `umem_num_frames` — doesn't help, causes overhead
@@ -233,8 +221,6 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
 - Never use `nohup ... </dev/null` for micro_kernel — monitor thread exits on stdin EOF.
   Use `screen -dmS` instead (provides a proper pty).
 - Never use `timeout` on the server or micro_kernel — wrap them in `screen` instead.
-- Never assume `grep mlx5_comp` targets the right PCI device — there are 2 mlx5 NICs.
-  Always verify the PCI slot: `0000:03:00.1` for `ens1f1np1`.
 - Never run epoll_* or flexkvs_bench without `timeout` — they loop forever.
 
 ## Multi-node orchestration
@@ -255,10 +241,8 @@ wait
   `lscpu` on node0: `Socket(s): 1, Core(s) per socket: 10`. No core-count
   excuse for the throughput gap; treat gaps as real bugs to investigate.
 - NIC: `ens1f1np1` (PCI 0000:03:00.1), NUMA node 0
-- Second mlx5 device at PCI 0000:07:00.0 (unused, but its IRQs appear in
-  `/proc/interrupts` and confuse `grep mlx5_comp`)
 - SMT=on (HT enabled, removed `nosmt` from GRUB): 20 logical CPUs online
-  (cores 0-9 physical, 10-19 HT siblings). NIC has 10 combined queues → `-q 10`.
+  (cores 0-9 physical, 10-19 HT siblings). NIC has 20 combined queues.
   mk's `CP_CPU=19` (SMT sibling of core 9) is online and the internal
   `pthread_setaffinity_np` succeeds. This matches the paper's design (§6).
 - C-states=off (`intel_idle.max_cstate=0`), ASPM=off — required for sub-15µs latency metrics
@@ -267,7 +251,7 @@ wait
 - `Ansible/playbooks/eTran/setup/` — one-time: system deps, kernel build, install eTran
 - `Ansible/playbooks/eTran/tuning/` — one-time (persists reboot): mitigations off, C-states off, ASPM off, tuned
   (SMT is now ON — `nosmt` removed; playbook renamed `02-tune-boot-params.yml`)
-- `Ansible/playbooks/eTran/evaluation/` — per-session (run after EVERY reboot): ARP, hosts, NIC tuning, IRQ affinity, MTU, verify
+- `Ansible/playbooks/eTran/evaluation/` — per-session (run after EVERY reboot): ARP, hosts, NIC tuning, MTU, verify
 
 ## Ansible inventory
 - `@server` = node0, `@clients` = node1–node9

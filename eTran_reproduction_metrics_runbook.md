@@ -4,10 +4,9 @@
 
 > **Current configuration:** SMT=ON (HT enabled, 20 logical CPUs). mk's
 > `CP_CPU=19` internal pin now works — the control_loop pins to the HT sibling
-> of core 19 as designed. NO `taskset` is needed for mk. NIC has 10 combined
-> queues, 10 IRQs pinned to physical cores 0-9. App threads on physical cores
-> 0-9, mk control_loop on core 19 (HT sibling of core 9). This matches the
-> paper's §6 design.
+> of core 19 as designed. NO `taskset` is needed for mk. NIC has 20 combined
+> queues. App threads on physical cores 0-9, mk control_loop on core 19
+> (HT sibling of core 9). This matches the paper's §6 design.
 
 | # | Metric | Our Result | Paper Target | % | Bottleneck |
 |---|--------|-----------|-------------|---|-----------|
@@ -97,11 +96,10 @@ against source code in:
 
 1. **Microkernel** must be running on every node:
    ```bash
-   cd /local/eTran/eTran/micro_kernel
-   sudo ./micro_kernel -i ens1f1np1 -q 10
-   ```
-    > **`-q 10` is required**: NIC has 10 combined queues (check with `ethtool -l ens1f1np1`).
-    > Default 20 crashes with `Number of queues is greater than NIC queues (20 > 10)`.
+    cd /local/eTran/eTran/micro_kernel
+    sudo ./micro_kernel -i ens1f1np1
+    ```
+    > Default 20 queues matches NIC combined=20 (check with `ethtool -l ens1f1np1`).
 
 2. **App binaries** live in their build subdirectories:
    ```
@@ -136,9 +134,9 @@ against source code in:
 
     # NO taskset for micro_kernel — CP_CPU=19 (defs.h:26) pins control_loop
     # to HT sibling core 19 automatically. Only works with HT ON.
-    # -q 10 matches the 10 NIC combined queues.
-    ssh node0 "sudo screen -dmS micro_kernel bash -c 'cd /local/eTran/eTran/micro_kernel && exec ./micro_kernel -i ens1f1np1 -q 10'"
-    ssh node1 "sudo screen -dmS micro_kernel bash -c 'cd /local/eTran/eTran/micro_kernel && exec ./micro_kernel -i ens1f1np1 -q 10'"
+    # Default 20 queues matches NIC combined=20.
+    ssh node0 "sudo screen -dmS micro_kernel bash -c 'cd /local/eTran/eTran/micro_kernel && exec ./micro_kernel -i ens1f1np1'"
+    ssh node1 "sudo screen -dmS micro_kernel bash -c 'cd /local/eTran/eTran/micro_kernel && exec ./micro_kernel -i ens1f1np1'"
     sleep 5
 
     ssh node0 "sudo screen -dmS server bash -c 'cd /local/eTran/eTran/homa_app && exec env ETRAN_PROTO=homa ./cp_node server'"
