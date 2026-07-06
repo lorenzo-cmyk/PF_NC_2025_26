@@ -283,12 +283,12 @@ wait
 
 ## Key source files
 > Paths relative to the eTran repo root (`https://github.com/eTran-NSDI25/eTran`).
-> Line numbers verified against the source clone on 2026-07-06.
+> Line numbers verified against the source clone on 2026-07-06 (re-verified 2026-07-06 against current checkout; some eBPF/control-plane drifts noted in commit history).
 
 ### Fastpath (where data packets actually flow — bypasses microkernel)
 - `micro_kernel/eBPF/entrance/entrance.c` — L48 `SEC("xdp_sock")`: parses eth/IP, tail-calls into Homa (`bpf_tail_call` at L74) / TCP (L71) transport programs; L82 `xdp_gen`, L93 `xdp_egress` dispatch by umem_id
-- `micro_kernel/eBPF/homa/main.c` — L293 `SEC("xdp_sock")`: L413,446,455,583 `bpf_redirect_map(&xsks_map, socket_id, XDP_DROP)` pushes Homa DATA packets directly into the app's AF_XDP socket (does NOT go through microkernel)
-- `micro_kernel/eBPF/homa/main.c:192` — grant emitted at NIC (`return XDP_TX`) by the L29 `SEC("xdp_gen")` program; per-CPU state: L59 `granting_idx[cpu]`, L78 `min(nr_grant_candidate[cpu], HOMA_OVERCOMMITMENT)` (HOMA_OVERCOMMITMENT=8). Tail-call grant-choose at L590,1242,1339,1435,1531,1627,1723,1819,1915 (`xdp_gen/complete_grant_*`)
+- `micro_kernel/eBPF/homa/main.c` — L293 `SEC("xdp_sock")`: L418,451,460,588 `bpf_redirect_map(&xsks_map, socket_id, XDP_DROP)` pushes Homa DATA packets directly into the app's AF_XDP socket (does NOT go through microkernel)
+- `micro_kernel/eBPF/homa/main.c` — L29 `SEC("xdp_gen")` emits grants at NIC (`L192 return XDP_TX`); per-CPU state L59 `granting_idx[cpu]++`, L78 `min(nr_grant_candidate[cpu], HOMA_OVERCOMMITMENT)` (HOMA_OVERCOMMITMENT=8). 8-step grant choose via tail-calls: SEC at L595,1247,1344,1440,1536,1632,1728,1824,1920 (`xdp_gen/{choose_rpc_to_grant,complete_grant_[1-8]}`); tail-call invocation sites at L1240,1338,1435,1531,1627,1723,1819,1915
 - `micro_kernel/eBPF/homa/main.c:235-248` — **XDP_EGRESS grant drop bug** (order-of-checks bug — apply patch: move `c->type != DATA` check before `data_header` bounds check, route non-DATA through `xmit_packet()`)
 - `micro_kernel/eBPF/tcp/main.c:258,367,378` — `bpf_redirect_map(&xsks_map, ...)` for TCP DATA; L373 `slow_path_map` lookup (the only path that reaches mk for handshake/control)
 - `lib/eTran_rpc.cc:288,426` — `poll_nic_rx()` / `poll_nic_rx_block(timeout)`: the **app's** RX fastpath. L323,463 `xsk_ring_cons__peek` on each queue's RX ring; L370,505 `client_response` / L372,507 `server_request` (DATA consumed here, in user space)
@@ -310,10 +310,10 @@ wait
 ### Buffer pool / constants
 - `common/xskbp/xsk_buffer_pool.h:33` — `umem_num_frames=64*XSK_RING_PROD__DEFAULT_NUM_DESCS`; L39 `buffers_per_slab=2*XSK_RING_PROD__DEFAULT_NUM_DESCS`; L70/L73 `nr_slabs` / `nr_slabs_avail` (slab counters — the `--ports > 4` crash hypothesis is **refuted 2026-07-06** with the BPF XDP_EGRESS patch; server runs cleanly at 5/7/10 ports)
 - `common/tran_def/homa.h:8` — `HOMA_MAX_MESSAGE_LENGTH = 1000000` (off-by-one: `--workload 1000000` stalls, use `999999`)
-- `common/tran_def/homa.h:10` — `enum homa_packet_type` (DATA/GRANT/RESEND/...)
+- `common/tran_def/homa.h:11` — `enum homa_packet_type` (DATA/GRANT/RESEND/...)
 
 ### Benchmark binaries
-- `homa_app/cp_node.cc:48` — `IF_NAME`="ens1f1np1"; L1457 `server_stats`, L1528 `client_stats`; L1616 default `--workload="100"`; L1929 `server_cmd`
+- `homa_app/cp_node.cc` — L54 `IF_NAME`="ens1f1np1"; L1426 `server_stats`, L1476 `client_stats`; L1616 default `workload = "100"`; L1603 `client_cmd`, L1929 `server_cmd`
 - `homa_app/dist.cc` — `w1`-`w5` CDF arrays; `dist_lookup()` handles `int`→fixed-size or `wN`
 - `tcp_app/epoll_client.cc` — TCP throughput client; `-b`(msg) `-i` `-f`(flows) `-t`(threads) `-o`(outstanding) `-w`(wait) `-l`(max_buf) `-s`(response toggle; **note** `-s` means "send full echo", default is short 100B — counterintuitive)
 - `tcp_app/epoll_server.cc` — TCP throughput server; same `-s` semantics

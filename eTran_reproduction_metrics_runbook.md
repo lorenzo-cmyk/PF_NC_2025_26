@@ -835,13 +835,14 @@ sudo timeout 15 taskset -c 3 ./xdpsock -i ens1f1np1 -q 3 -r -N -z
 ## Quick-Reference: Key Source Code in eTran repo
 
 > All paths relative to repo root `https://github.com/eTran-NSDI25/eTran`.
-> Line numbers verified against the clone at commit checked on 2026-07-06.
+> Line numbers re-verified 2026-07-06 against current checkout (after the
+> cp_node.cc / eBPF drifts noted in commit history were corrected).
 
 ### Benchmark / application binaries
 
 | File | Key Locations |
 |:--|:--|
-| `homa_app/cp_node.cc` | L48 `IF_NAME`="ens1f1np1"; L1457 `server_stats`, L1528 `client_stats` (Kops/Gbps/RTT P50-P99.9); L1603 `client_cmd` defaults, L1929 `server_cmd` |
+| `homa_app/cp_node.cc` | L54 `IF_NAME`="ens1f1np1"; L1426 `server_stats`, L1476 `client_stats` (Kops/Gbps/RTT P50-P99.9); L1603 `client_cmd` defaults, L1929 `server_cmd`; L1616 `workload = "100"` default |
 | `homa_app/dist.cc` | `w1`-`w5` CDF arrays; `dist_lookup()` handles int→fixed-size or `wN` name |
 | `tcp_app/epoll_client.cc` | `parse_args`: `-b`(msg size) `-i` `-f`(flows) `-t`(threads) `-o`(outstanding) `-w`(wait) `-l`(max_buf_size) `-s`(response toggle) |
 | `tcp_app/epoll_server.cc` | `parse_args`: `-b` `-i` `-t` `-l` `-s`; runs `while(1)`, no loop count |
@@ -864,16 +865,16 @@ sudo timeout 15 taskset -c 3 ./xdpsock -i ens1f1np1 -q 3 -r -N -z
 | File | Key Locations |
 |:--|:--|
 | `micro_kernel/eBPF/entrance/entrance.c` | L48 `SEC("xdp_sock")` — parses eth/IP, tail-calls into Homa/TCP transport programs; L82 `SEC("xdp_gen")`, L93 `SEC("xdp_egress")` — dispatch by umem_id; L104 `xdp/cpumap` |
-| `micro_kernel/eBPF/homa/main.c` | L29 `SEC("xdp_gen")` — **grant generator**: L59 `granting_idx[cpu]++`, L78 `min(nr_grant_candidate[cpu], HOMA_OVERCOMMITMENT)`, **L192 `return XDP_TX`** (emit grant at NIC); L211 `SEC("xdp_egress")`, **L248 `c->type != DATA`** check (XDP_EGRESS grant drop bug — apply patch at L235-248); L293 `SEC("xdp_sock")` — DATA redirector; **L413,446,455,583 `bpf_redirect_map(&xsks_map, socket_id, XDP_DROP)`** (push DATA → app XSK, bypasses mk); L590,1242,1339...2019 `xdp_gen/complete_grant_*` tail-calls (8-step grant choose) |
-| `micro_kernel/eBPF/tcp/main.c` | L30 `slow_path_map`; L34 `xsks_map` (XSKMAP); L40 `SEC("xdp_gen")` — TCP ACK gen (`bpf_xdp_adjust_tail`); L147 `SEC("xdp_egress")`; **L258 `bpf_redirect_map(&xsks_map, c->qid2xsk[ctx->rx_queue_index])`** (fastpath data → app); L265 `SEC("xdp_sock")`; L323 `XDP_PASS`; **L367,378 `bpf_redirect_map(&xsks_map, ...)`** (sp/xid redirect); L373 `slow_path_map` lookup (→ mk) |
+| `micro_kernel/eBPF/homa/main.c` | L29 `SEC("xdp_gen")` — **grant generator**: L59 `granting_idx[cpu]++`, L78 `min(nr_grant_candidate[cpu], HOMA_OVERCOMMITMENT)`, **L192 `return XDP_TX`** (emit grant at NIC); L211 `SEC("xdp_egress")`, **L248 `c->type != DATA`** check (XDP_EGRESS grant drop bug — apply patch at L235-248); L293 `SEC("xdp_sock")` — DATA redirector; **L418,451,460,588 `bpf_redirect_map(&xsks_map, socket_id, XDP_DROP)`** (push DATA → app XSK, bypasses mk); **L595 `SEC("xdp_gen/choose_rpc_to_grant")`** + L1247,1344,1440,1536,1632,1728,1824,1920 `SEC("xdp_gen/complete_grant_N")` (8-step grant choose) — tail-call invocation sites at L1240,1338,1435,1531,1627,1723,1819,1915 |
+| `micro_kernel/eBPF/tcp/main.c` | L30 `slow_path_map`; L38 `xsks_map` (XSKMAP); L40 `SEC("xdp_gen")` — TCP ACK gen (`bpf_xdp_adjust_tail`); L147 `SEC("xdp_egress")`; **L258 `bpf_redirect_map(&xsks_map, c->qid2xsk[ctx->rx_queue_index])`** (fastpath data → app); L265 `SEC("xdp_sock")`; L323 `XDP_PASS`; **L367,378 `bpf_redirect_map(&xsks_map, ...)`** (sp/xid redirect); L373 `slow_path_map` lookup (→ mk) |
 
 ### Application library (libetran.so — the actual fastpath polling path)
 
 | File | Key Locations |
 |:--|:--|
 | `lib/eTran_rpc.cc` | **L288 `poll_nic_rx()`** and **L426 `poll_nic_rx_block(timeout)`** — the app's RX fastpath: **L323,463 `xsk_ring_cons__peek`** on each queue's RX ring; L370,505 `client_response(qidx,d)` / L372,507 `server_request(qidx,d,remote_ip,rpcid)` (DATA → app); **L187 `xsk_ring_prod__reserve(&xsk_info->tx, rm.nr_pkt)` + L203 `kick_tx(...)`** — app TX path; L717,795 more `kick_tx` sites. L443 `_pending_*` queue drain to keep busy-poll nonblocking. **This is where Homa data packets are actually consumed and processed.** |
-| `lib/eTran_posix.cc` | L159 `socket_homa_poll` (in `homa_app` shim); **L1168 `process_homa_kernel_events`** — drains `app_in` LRPC for `APPIN_HOMA_STATUS_BIND`/`CLOSE` from mk; L1228 `eTran_homa_poll_events`; L380,667,767,854,950,989 TCP XSK TX paths |
-| `lib/socket.cc` | **L405** "Connection is closed by microkernel" idle-drop message (TCP idle timeout) |
+| `lib/socket.cc` | L159 `socket_homa_poll` (the homa shim's blocking-poll entry, called from epoll loop at L615, L781); **L405** "Connection is closed by microkernel" idle-drop message (TCP idle timeout) |
+| `lib/eTran_posix.cc` | **L1168 `process_homa_kernel_events`** — drains `app_in` LRPC for `APPIN_HOMA_STATUS_BIND`/`CLOSE` from mk; L1228 `eTran_homa_poll_events`; L380,667,767,854,950,989 TCP XSK TX paths |
 | `lib/eTran_common.cc` | **L595 `pre_main` constructor** — reads `ETRAN_PROTO` (L600, required), `ETRAN_NR_APP_THREADS` (L598) + `ETRAN_NR_NIC_QUEUES` (L599, required for TCP) |
 | `lib/xsk_if.cc` | L20 `tx_ring_size=XSK_RING_PROD__DEFAULT_NUM_DESCS`; L38 `XDP_TX_RING` setsockopt; the per-thread XSK setup shared by app library |
 | `shared_lib/interpose.cc` | Builds `libetran.so` — LD_PRELOAD intercepts `socket`/`epoll_wait`/`read`/`write` |
@@ -882,7 +883,7 @@ sudo timeout 15 taskset -c 3 ./xdpsock -i ens1f1np1 -q 3 -r -N -z
 
 | File | Key Locations |
 |:--|:--|
-| `common/tran_def/homa.h` | **L8 `HOMA_MAX_MESSAGE_LENGTH = 1000000`** (off-by-one: `--workload 1000000` stalls, use 999999); L10 `enum homa_packet_type` (DATA/GRANT/RESEND/...) |
+| `common/tran_def/homa.h` | **L8 `HOMA_MAX_MESSAGE_LENGTH = 1000000`** (off-by-one: `--workload 1000000` stalls, use 999999); L11 `enum homa_packet_type` (DATA/GRANT/RESEND/...) |
 | `common/xskbp/xsk_buffer_pool.h` | **L33 `umem_num_frames=64*XSK_RING_PROD__DEFAULT_NUM_DESCS`**; **L39 `buffers_per_slab=2*XSK_RING_PROD__DEFAULT_NUM_DESCS`**; L70 `nr_slabs`, L73 `nr_slabs_avail` — slab counters (the `--ports > 4` crash claim was **refuted 2026-07-06**: server `--ports 5/7/10` with 500KB RPCs and the BPF XDP_EGRESS patch applied run cleanly at ~12.8 Gbps; the 13 Gbps ceiling is NOT a slab limit) |
 | `micro_kernel/eBPF/homa/rpc.h` | L1584 `xmit_ctrl_pkt` (used by eBPF grant/ctrl TX); per-RPC state map structures |
 | `micro_kernel/eBPF/homa/pacing.h` | Grant pacing structures (per-CPU `granting_idx`, `nr_grant_candidate`, `finish_grant_choose`) |
