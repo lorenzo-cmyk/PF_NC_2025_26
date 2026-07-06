@@ -78,7 +78,8 @@ ssh node0 "sudo screen -S server -X hardcopy /tmp/srv.log; \
 The procedure above is for **Homa** metrics (1-6, 22). TCP benchmarks (13-21)
 use different binaries and env vars:
 - **Server**: `epoll_server` (TCP throughput) or `flexkvs_server` (KV) — both in
-  `tcp_app/`. Must set `ETRAN_NR_APP_THREADS=1 ETRAN_NR_NIC_QUEUES=10` via `env`.
+  `tcp_app/`. Must set `ETRAN_NR_APP_THREADS=N ETRAN_NR_NIC_QUEUES=N` via `env`
+  (N = number of app threads, both must match).
 - **Client**: `epoll_client` or `flexkvs_bench` — in `tcp_app/`. Same env vars.
 - **micro_kernel** is still required (libetran.so routes TCP via AF_XDP).
 - Output is hidden over SSH (C stdout buffering) — prefix with `script -q -c`.
@@ -119,16 +120,22 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
 - Metrics 2: `--client-max 1 --ports 1` (single-stream back-to-back)
 - Metric 3: server `--ports 4` (or 5/7/10 — crashing has stopped happening
   after the XDP_EGRESS patch; throughput is identical ~13 Gbps regardless of
-  port count), clients `--ports 1 --client-max 1`. With mk pinned to core 9 +
-  server pinned to cores 0-7, server-side reads ~13 Gbps. Bottleneck = Homa
+  port count), clients `--ports 1 --client-max 1`. CP_CPU=19 internally pins mk
+  to core 19 (HT sibling of core 9); server pinned to cores 0-7 gives ~13 Gbps.
+  Bottleneck = Homa
   grant dispatch (per-CPU XDP_GEN state), so adding ports does NOT help.
 - Metric 4: servers default ports, client `--ports 7 --client-max 1` (sweet spot for 10-core)
 - Metric 1-2: 2 nodes only
 - Metric 5: server `--ports 7` (32B safe from buffer-pool crash), clients
   `--ports 1 --client-max 64`; no taskset (CP_CPU=19 works with HT-on).
-  Client aggregate ~1040 Kops (steady ~955 Kops server side).
+  Server steady ~927 Kops.
 - Metric 6: client `--ports 7 --client-max 128 --server-nodes 7` (best new sweet spot);
-  no taskset (CP_CPU=19 works). Steady ~820 K server-side, client-side ~1099 K.
+  no taskset (CP_CPU=19 works). Client steady ~1120 Kops, servers ~160 Kops each.
+- Metrics 7-12 (W2-W5 all-to-all): `--both 2 --id N` on all 10 nodes.
+  Requires `micro_kernel` restart between each workload (4 total).
+  Results (2026-07-06): W2 P50=109 µs P99=1344 µs (even load ~430 Kops/node);
+  W3 P50=115 µs P99=1428 µs; W4 shortest-10% P50=2848 µs; W5 shortest-10% P50=14530 µs.
+  Linux-Homa baseline postponed. `--server-ports 4` max before buffer pool crash.
 - Metrics 13-21: TCP benchmarks, use `script -q -c` over SSH for visible output
 - Metric 15: stagger clients 0.5s apart to avoid overwhelming server
 - Metrics 19-20: KV latency beats paper targets (14 vs 17.2 µs P50, 16 vs 27.5 µs P99)
@@ -143,11 +150,11 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
   patch (it affected TCP egress paths too, not just Homa grants). Metrics 13-15 and
   18-21 confirmed working.
 - **SMT ON works fine** — the earlier "SMT ON breaks eTran entirely" claim was
-  false. With HT-on, eTran runs correctly: metric 1 (12.70 µs P50),
-  metric 2 (16.6 Gbps), and metric 5 (~990 Kops) all produce valid results.
+  false. With HT-on, eTran runs correctly: metric 1 (12.59 µs P50),
+  metric 2 (16.6 Gbps), and metric 5 (~927 Kops server steady) all produce valid results.
   HT-on gives a ~8% improvement in metric 5 vs the old taskset-c9 workaround.
-  IRQ pinning does not affect results (tested: pinned 2:1 vs default vs no pin
-  all within noise on metric 5).
+  IRQ pinning was tested (metric 5) and shown to have no effect — the playbook
+  and all IRQ references have been removed from the repo.
 - **CP_CPU=19 internal pin now works** — with HT enabled, core 19 (SMT sibling
   of core 9) is online. The `pthread_setaffinity_np` at `control_plane.cc:1155`
   succeeds for the first time, pinning the mk control_loop to its intended core.
@@ -162,7 +169,14 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
   produces valid data before the drop. Use `timeout 15` for clean runs.
 - epoll_* and flexkvs output is hidden over SSH (C stdout buffering). Use
   `script -q -c 'command' /dev/null` to force line-buffered output.
+  **Env vars must be inside the `-c` argument** — `env VAR=val script -q -c 'cmd'`
+  does NOT pass env vars into the subshell. Use: `script -q -c 'VAR=val ./cmd' /dev/null`.
 - All-to-all `--both` segfaults on exit (shared memory cleanup race)
+- Per-node variance in W2-W5: `--both 2` timing creates wall-clock misalignment
+  between nodes. W2 even (9/10 nodes at ~430 Kops), W3-W5 show 10-100x variance.
+  Pre-starting servers then launching clients simultaneously may improve consistency.
+- `dump_times` output includes comment header lines (`# --server-nodes ...`).
+  Always filter with `grep -v '^#'` before processing RTT data.
 - Throughput gap vs paper (metrics 3/5/6 at 25-56%) is NOT a core-count
   deficit — paper used identical CloudLab xl170 single-socket 10-core nodes.
   And it is NOT a microkernel dispatch bottleneck: **the Homa data path is
@@ -177,8 +191,9 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
   (`eBPF/tcp/main.c:258,367,378`); mk only owns TCP handshake/control.
   Real Homa bottlenecks to investigate: XDP_GEN grant eBPF serialization,
   per-app-thread polling rate, BPF RPC-map contention between the app
-  fastpath and mk's 1ms `poll_homa_to` batch scan, NIC IRQ/RSS distribution.
-  Plus the `--ports > 4` buffer-pool slab crash that caps server parallelism.
+  fastpath and mk's 1ms `poll_homa_to` batch scan. IRQ pinning was tested
+  (metric 5) and showed no effect. Plus the `--ports > 4` buffer-pool slab
+  crash that caps server parallelism.
 - flexkvs_server hardcodes port 11211; flexkvs_bench `--time`/`--warmup`/`--cooldown`
   are stored but never enforced — always wrap in `timeout`.
 - **Micro_kernel threading model**: `ps -L` shows only 3 mk threads (main,

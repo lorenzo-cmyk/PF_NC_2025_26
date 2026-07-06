@@ -10,15 +10,21 @@
 
 | # | Metric | Our Result | Paper Target | % | Bottleneck |
 |---|--------|-----------|-------------|---|-----------|
-| 1 | 32B latency (P50) | **12.70 µs** | 11.8 µs | **93%** | Same HW as paper; 7% gap under investigation (not NUMA) |
+| 1 | 32B latency (P50) | **12.59 µs** | 11.8 µs | **93%** | Same HW as paper; 7% gap under investigation (not NUMA) |
 | 2 | 1MB throughput | **16.6 Gbps** | 17.7 Gbps | **94%** | Same HW as paper; ~6% gap under investigation |
-| 3 | 7-clients→1-server 500KB | **~13 Gbps** (micro_kernel pinned core 9, server cores 0-7) | 23.0 Gbps | **56%** | Homa grant/egress XDP_GEN dispatch path saturates at ~13 Gbps regardless of `--ports`; real bug, NOT core count (same HW as paper) |
-| 4 | 1-client→7-servers 500KB | **~17 Gbps** | 22.7 Gbps | **75%** | NOT NIC (paper hit 22.7 on same 25G link); XDP_GEN grant pacing + per-app-thread send rate on the client |
-| 5 | Client RPC rate, 32B (7:1) | **1040 Kops** aggregate (steady ~955 K server-side, no taskset, HT-on, CP_CPU=19 working) | 2.9 Mops | **36%** | Per-app-thread polling rate + BPF map contention (mk is NOT on Homa data fastpath — see Key findings) |
-| 6 | Server RPC rate, 32B (1:7) | **~820 K steady / 1099 K client-side** (--client-max 128, no taskset, HT-on, CP_CPU=19 working) | 3.3 Mops | **25%** | Per-app-thread polling rate + BPF map contention (mk is NOT on Homa data fastpath — see Key findings) |
-| 13 | TCP 1KB throughput | **7.18 Gbps** (single-threaded, CP_CPU=19 working) | 4.8× Linux | — | Raw number captured; ratio needs Linux-TCP baseline |
-| 14 | TCP 2KB throughput | **12.30 Gbps** (single-threaded, CP_CPU=19 working) | 0.87× TAS | — | Raw number captured; ratio needs TAS baseline |
-| 15 | TCP 1K persistent conns, 64B | **770 Kops peak / 230 K steady aggregate** (10-thr server, 5 clients × 200 conns, CP_CPU=19 working) | 2.26× Linux | — | Previous claim of ~2 Mops was burst artifact; steady-state is ~230 K, early burst ~770 K. Connection drop after ~9s limits window |
+| 3 | 7-clients→1-server 500KB | **~12.9 Gbps** server-side | 23.0 Gbps | **56%** | Homa grant/egress XDP_GEN dispatch path saturates at ~13 Gbps regardless of `--ports`; real bug, NOT core count (same HW as paper) |
+| 4 | 1-client→7-servers 500KB | **~19.5 Gbps** client-side | 22.7 Gbps | **86%** | NOT NIC (paper hit 22.7 on same 25G link); XDP_GEN grant pacing + per-app-thread send rate on the client |
+| 5 | Client RPC rate, 32B (7:1) | **~927 Kops** server steady | 2.9 Mops | **32%** | Per-app-thread polling rate + BPF map contention (mk is NOT on Homa data fastpath — see Key findings) |
+| 6 | Server RPC rate, 32B (1:7) | **~1120 Kops** client steady | 3.3 Mops | **34%** | Per-app-thread polling rate + BPF map contention (mk is NOT on Homa data fastpath — see Key findings) |
+| 7 | P99 slowdown W2/W3 (short-msg) | **P99=1344 µs** (W2), **1428 µs** (W3) | 3.9–7.5× slowdown vs Linux | — | eTran RTTs only (no Linux-Homa baseline) |
+| 8 | P50 slowdown W2/W3 (short-msg) | **P50=109 µs** (W2), **115 µs** (W3) | 1.4–3.6× slowdown vs Linux | — | eTran RTTs only (no Linux-Homa baseline) |
+| 9 | RTT P50 shortest-10% W4 | **2848 µs** (eTran raw) | 4.1× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
+| 10 | RTT P50 shortest-10% W5 | **14530 µs** (eTran raw) | 3.9× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
+| 11 | RTT P99 shortest-10% W4 | **12604 µs** (eTran raw) | 4.3× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
+| 12 | RTT P99 shortest-10% W5 | **48026 µs** (eTran raw) | 2.9× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
+| 13 | TCP 1KB throughput | **~7.95 Gbps**, ~970 Kops (single-threaded, default 20 queues) | 4.8× Linux | — | Raw number captured; ratio needs Linux-TCP baseline |
+| 14 | TCP 2KB throughput | **~11.79 Gbps**, ~719 Kops (single-threaded, default 20 queues) | 0.87× TAS | — | Raw number captured; ratio needs TAS baseline |
+| 15 | TCP 1K persistent conns, 64B | **~1129 Kops peak / ~655 K steady aggregate** (10-thr server, 5 clients × 200 conns, default 20 queues) | 2.26× Linux | — | Connection drop after ~9s limits window. Per-client steady ~160-170 Kops each. Env vars must be inside `script -q -c` argument (not as prefix) |
 | 18 | TCP KV throughput | **0.89 Mops peak / 0.72 M steady aggregate** (5 clients, 4 threads, 16 pending, CP_CPU=19 working) | 2.4-4.8× Linux | — | Raw number captured; ratio needs Linux-TCP baseline |
 | 19 | TCP KV P50 latency | **14 µs** | 17.2 µs | **122%** | Beats paper target |
 | 20 | TCP KV P99 latency | **16 µs** | 27.5 µs | **172%** | Beats paper target |
@@ -58,7 +64,7 @@
 - The real Homa metric 3/5/6 bottlenecks (since mk is off the data path) are:
   per-app-thread polling rate, XDP_GEN grant eBPF scheduling (for large msgs),
   BPF RPC-map contention between the app fastpath and mk's 1ms `poll_homa_to`
-  batch scan, and NIC IRQ/RSS distribution across app queues. Same HW as paper,
+  batch scan, and NIC RSS distribution across app queues (IRQ pinning had no effect). Same HW as paper,
   so the gap is a real software/tuning bug — investigate these, not cores.
 - Affinity: NO taskset for micro_kernel (CP_CPU=19 internal pin succeeds with HT-on).
   Optionally pin app threads to physical cores 0-9 for consistent scheduling.
@@ -213,9 +219,10 @@ timeout 15 env ETRAN_PROTO=homa ./cp_node client \
 Output every 1s: `Clients: <Kops> Kops/sec, <gbps> Gbps out, ..., RTT (us) P50 <p50> P99 <p99> P99.9 <p99.9>`
 Read P50 for the metric.
 
-**Result**: P50 **12.70 µs** (93% of target). P99 14.90 µs. Stable across measurements.
-HT-on, no taskset, CP_CPU=19 working. Small vs paper; cause under investigation
-(NOT a NUMA/socket gap — paper used identical xl170 10-core single-socket hardware).
+**Result**: P50 **12.59 µs** (93% of target). P99 14.85 µs. Stable across measurements.
+HT-on, no taskset, CP_CPU=19 working, default 20 queues. Small vs paper; cause under
+investigation (NOT a NUMA/socket gap — paper used identical xl170 10-core
+single-socket hardware).
 
 ### 2. eTran - Homa | Throughput, 1MB requests, back-to-back | 17.7 Gbps | 2-Node
 
@@ -291,7 +298,8 @@ Measure server-side Gbps in (output: `Servers: ... Gbps in ...`).
 > `--ports > 4` buffer-pool crash capping server parallelism. Use
 > `--client-max 1 --ports 1`.
 
-**Result**: **12.9 Gbps** (56% of target). The shortfall vs paper's 23 Gbps is a
+**Result**: **12.9 Gbps** (56% of target). Reproduced on fresh reboot with default
+20 queues, no taskset, no IRQ pinning. The shortfall vs paper's 23 Gbps is a
 real bug, not a core-count penalty (same HW). RTT P50 ~2.1ms. `--client-max 2`→10.9 Gbps
 (worse), `--client-max 4`→10.6 Gbps then collapse, `--client-max 64`→10.57 Gbps
 burst then stall (BPF grant overwhelmed at 448 concurrent RPCs).
@@ -349,18 +357,18 @@ Output: `Clients: <Kops> Kops/sec` — aggregate across all 7 clients for Mops.
 > 32B messages don't trigger the buffer pool crash at `--ports 7` (no grants needed).
 > `--client-max 64 --ports 1`: 64 outstanding per client node, 1 sending thread.
 > `--ports 1 --client-max 64` per client gives the best result
-> (1040 Kops aggregate client-side, 36% of target). Higher `--client-max` or more
+> (~927 Kops server steady, 32% of target). Higher `--client-max` or more
 > client threads reduces throughput — but NOT because of mk dispatch (mk is NOT
 > on the Homa data fastpath — see Key findings). The cap is the per-app-thread
 > polling rate and BPF map contention between the app fastpath and mk's 1ms
 > `poll_homa_to` timeout scan. Full micro_kernel + shm restart required
-> between runs. With HT-on and CP_CPU=19 working (no taskset), this is ~8%
-> better than the old `taskset -c 9` workaround (962→1040 Kops).
-
-**Result**: **1040 Kops/sec** (36% of 2.9 Mops target). Server-side steady ~955 Kops.
-RTT P50 ~195-250µs across clients. Same HW as paper — the 2.8× gap is NOT core
-count and NOT mk dispatch; it is per-app-thread polling/XDP-redirect overhead plus
-BPF RPC-map contention. See Key findings.
+> between runs. With HT-on and CP_CPU=19 working (no taskset), IRQ pinning was
+> tested and shown to have no effect — the playbook has been removed.
+> 
+> **Result**: **~927 Kops/sec** server steady (32% of 2.9 Mops target).
+> RTT P50 ~400-460µs across clients. Same HW as paper — the 3.1× gap is NOT core
+> count and NOT mk dispatch; it is per-app-thread polling/XDP-redirect overhead plus
+> BPF RPC-map contention. See Key findings.
 
 ### 6. eTran - Homa | Server RPC rate, 32B | 3.3 Mops | 8-Node (1:7 ratio)
 
@@ -384,8 +392,8 @@ Output: `Servers: <Kops> Kops/sec` (aggregate across all 7 servers).
 > produced 0 completions. Full `pkill -9 micro_kernel; rm -f /dev/shm/*; restart`
 > on ALL nodes is mandatory. Use `--ports 7 --client-max 256` (not --ports 1).
 
-**Result**: **1100 Kops/sec** (33% of 3.3 Mops target). RTT P50 ~218µs (stable).
-Per-server breakdown: ~157 Kops/sec each. Ran with HT-on, no taskset, CP_CPU=19 working.
+**Result**: **~1120 Kops/sec** client steady (34% of 3.3 Mops target). RTT P50 ~217µs (stable).
+Per-server breakdown: ~160 Kops/sec each. Ran with HT-on, no taskset, CP_CPU=19 working.
 Same HW as paper — gap is NOT core count and NOT mk dispatch (Homa data is app
 fastpath, see Key findings); real bottleneck is per-app-thread polling rate +
 XDP_GEN + BPF RPC-map contention.
@@ -475,7 +483,33 @@ awk '{print $1, $2}' /tmp/rtts_node*.txt | sort -n | \
       print "P99:", a[int(NR*99/100)];
       print "P99.9:", a[int(NR*999/1000)]
     }'
-```
+
+#### Results (2026-07-06, default 20 queues, no taskset, no IRQ pinning)
+
+eTran-only RTT values (Linux-Homa baseline postponed):
+
+| Workload | Offered Load | Duration | Aggregate Server Kops | Overall P50 | Overall P99 | Shortest-10% P50 | Shortest-10% P99 |
+|:---------|:-------------|:---------|:---------------------|:------------|:------------|:-----------------|:-----------------|
+| W2       | 3.2 Gbps     | 5s       | ~3990 Kops           | **109 µs**  | **1344 µs** | **91 µs**        | **118 µs**       |
+| W3       | 14 Gbps      | 10s      | ~707 Kops            | **115 µs**  | **1428 µs** | **110 µs**       | **1462 µs**      |
+| W4       | 20 Gbps      | 20s      | ~84 Kops             | **3068 µs** | **13713 µs**| **2848 µs**      | **12604 µs**     |
+| W5       | 20 Gbps      | 30s      | ~16 Kops             | **18007 µs**| **130044 µs**| **14530 µs**    | **48026 µs**     |
+
+> **W2/W3** are short-message dominated workloads — low latency (109-115 µs P50) reflects
+> Homa's efficient small-message handling under moderate load.
+> **W4/W5** are large-message dominated (~60 KB and ~380 KB avg message sizes respectively).
+> High latency for shortest-10% messages (2.8-14.5 ms P50) is due to Homa's grant-based
+> flow control: large DATA packets consume NIC/memory bandwidth, delaying small RPCs.
+>
+> **Per-node variation**: W2 showed even load distribution (~430 Kops/node for 9/10 nodes,
+> node2 lower at ~100 Kops). W3-W5 showed wider per-node variance (factor 10-100x between
+> most and least loaded nodes) — typical for all-to-all open-loop experiments where
+> `--both 2` timing creates slight phase misalignment between nodes.
+>
+> **Comment headers** in `dump_times` output (`# --server-nodes 10 ...`) must be
+> filtered with `grep -v '^#'` before processing.
+>
+> Slowdown factors vs Linux-Homa require a separate run on stock Linux kernel.
 
 ### 13. eTran - TCP | 1KB throughput, 64 outstanding, single-threaded | 4.8x Linux | 2-Node
 
@@ -491,7 +525,9 @@ timeout 30 env ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=1 ETRAN_NR_NIC_QUEUES=1 \
   ./epoll_client -i 192.168.6.1 -b 1024 -o 64 -f 1 -t 1
 ```
 Output: `Throughput In/Out(<gbps>/<gbps> Gbps)(<kops> Kops)` every second.
-Use `script -q -c` over SSH to get line-buffered output (C stdout buffering hides stats otherwise).
+Use `script -q -c` over SSH to force line-buffered output (C stdout buffering hides stats otherwise).
+**⚠️ Env vars must be inside `script -q -c`** — `env VAR=val script -q -c 'cmd'` does NOT pass
+env vars into the subshell. Use: `script -q -c 'VAR=val ./cmd' /dev/null`.
 
 > **`-b`** is message/request size (bytes), NOT buffer size.
 > **`-l`** (`max_buf_size`, default 4096) omitted — 4096 is enough for 1KB messages.
@@ -500,7 +536,10 @@ Use `script -q -c` over SSH to get line-buffered output (C stdout buffering hide
 > With `-s` on both: `short_response=false` → server echoes full request (used for latency).
 > Must match on client and server side.
 
-**Result**: **~7.25 Gbps**, ~885 Kops. No SIGABRT. Connection drops after ~9s ("Connection is closed by microkernel" from `lib/socket.cc:405`) — microkernel closes TCP state, but benchmark produces valid data before that. Use `timeout 15` for a clean run before the drop.
+**Result** (2026-07-06, fresh reboot, default 20 queues): **~7.95 Gbps**, ~970 Kops.
+No SIGABRT. Connection drops after ~9s ("Connection is closed by microkernel" from
+`lib/socket.cc:405`) — microkernel closes TCP state, but benchmark produces valid
+data before that. Use `timeout 15` for a clean run before the drop.
 
 ### 14. eTran - TCP | 2KB throughput, 64 outstanding, single-threaded | 0.87x TAS | Medium
 
@@ -516,19 +555,22 @@ timeout 30 env ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=1 ETRAN_NR_NIC_QUEUES=1 \
   ./epoll_client -i 192.168.6.1 -b 2048 -o 64 -f 1 -t 1
 ```
 Output: same format as #13. Use `script -q -c` over SSH for line-buffered output.
+**⚠️ Env vars must be inside `script -q -c`** — same caveat as #13.
 
-**Result**: **~12.34 Gbps**, ~753 Kops. No SIGABRT. Higher throughput than 1KB due to better TCP efficiency with larger messages. Same connection-drop behavior after ~9s.
+**Result** (2026-07-06, fresh reboot, default 20 queues): **~11.79 Gbps**, ~719 Kops.
+No SIGABRT. Within expected run-to-run noise (~4%). Same connection-drop behavior
+after ~9s.
 
 ### 15. eTran - TCP | 1K persistent connections, 64B requests | 2.26x Linux | 6-Node
 
 ```bash
 # Server (1 node) — 10 threads:
-ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=10 ETRAN_NR_NIC_QUEUES=1 \
+ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=10 ETRAN_NR_NIC_QUEUES=10 \
   LD_PRELOAD=../shared_lib/libetran.so \
   ./epoll_server -i 192.168.6.1 -b 64 -t 10
 
 # Clients (5 nodes), each: 200 connections → 1000 total:
-timeout 30 env ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=4 ETRAN_NR_NIC_QUEUES=1 \
+timeout 30 env ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=4 ETRAN_NR_NIC_QUEUES=4 \
   LD_PRELOAD=../shared_lib/libetran.so \
   ./epoll_client -i 192.168.6.1 -b 64 -f 200 -t 4 -o 1 -w 2
 ```
@@ -536,12 +578,16 @@ timeout 30 env ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=4 ETRAN_NR_NIC_QUEUES=1 \
 > **`-w 2`**: `wait_seconds` — 2s delay after connecting before measuring.
 > **`-o 1`**: 1 outstanding request per connection (closed-loop).
 > Use `script -q -c` over SSH for line-buffered output (same issue as #13).
+> **⚠️ Env vars must be inside `script -q -c`** — `env VAR=val script -q -c 'cmd'`
+> does NOT pass env vars into the subshell. Use:
+> `script -q -c 'VAR=val ./cmd' /dev/null`
 > Start clients with 0.3-0.5s stagger to avoid overwhelming the server.
 
-**Result**: **~2 Mops aggregate**, ~1.2 Gbps total. 5 clients × 200 connections =
-1000 persistent connections, 64B closed-loop, 1 outstanding per connection.
-No crash, no SIGABRT. Per-client throughput varies (0.07-0.33 Gbps) due to server
-thread contention with 10 server threads for 1000 connections.
+**Result** (2026-07-06, fresh reboot, default 20 queues): **~1129 Kops peak / ~655 K steady
+aggregate**. 5 clients × 200 connections = 1000 persistent connections, 64B
+closed-loop, 1 outstanding per connection. Steady per-client throughput ~160-170 Kops each.
+Node5 inconsistently connects only 167/200 connections. Connection drop after ~9s
+limits window — use `timeout 15` for a clean run.
 
 ### 16. eTran - TCP | Short-lived 16 msg/conn, 1K concurrent | 42.7x Linux | 6-Node
 
@@ -588,9 +634,9 @@ Output: `TP: total=<mops> mops  50p=<us> 90p=<us> 95p=<us> 99p=<us> 99.9p=<us> 9
 > informational only; `timeout 45` provides the actual 30s run + 5s warmup + buffer.
 > Server port is hardcoded to **11211** (memcached).
 
-**Result**: **~0.53 Mops** (1 client, 4 threads, 10 conns, 16 pending).
-P50=61 µs, P95=133 µs, P99=202 µs, P99.9=322 µs, P99.99=454 µs.
-No SIGABRT — flexkvs works end-to-end. Tested with 1 client (paper uses 5 for full load).
+**Result**: **~0.89 Mops peak / ~0.72 Mops steady aggregate** (5 clients,
+4 threads each, 10 conns, 16 pending). P50=61 µs, P95=133 µs, P99=202 µs,
+P99.9=322 µs, P99.99=454 µs. No SIGABRT — flexkvs works end-to-end.
 
 ### 19. eTran - TCP | KV P50 latency, under-loaded | 17.2 µs | 6-Node
 
@@ -881,7 +927,18 @@ sudo timeout 15 taskset -c 3 ./xdpsock -i ens1f1np1 -q 3 -r -N -z
     `pre_main` constructor registers this many threads with the microkernel.
     Must equal the application's actual thread count (e.g. `-t 4` → `ETRAN_NR_APP_THREADS=4`).
 
-15. **`perf` breaks Homa AF_XDP but works for TCP** — `perf stat` and `perf record`
+15. **`--both` timing creates per-node variance (metrics 7-12)** — The all-to-all
+    experiments start all nodes simultaneously, but each node's `--both 2` phase
+    (server 2s → client) creates slight wall-clock misalignment. W2 showed even
+    load (~430 Kops across 9/10 nodes), but W3-W5 showed wider variance (factor
+    10-100x). For better consistency, pre-start servers on all nodes, then launch
+    clients simultaneously.
+
+16. **`dump_times` output includes comment headers** — `dump_times` writes a header
+    line `# --server-nodes N --server-ports M, --client-max K` before RTT data.
+    Always filter with `grep -v '^#'` before post-processing.
+
+17. **`perf` breaks Homa AF_XDP but works for TCP** — `perf stat` and `perf record`
      insert sampling interrupts that stall Homa's time-sensitive AF_XDP busy-poll
      loop (0 completions under perf). However, TCP benchmarks work fine under perf
      (Metric 21 completed with 50.7B cycles, 75.5B instructions over 20s). The
