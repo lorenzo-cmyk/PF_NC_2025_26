@@ -31,18 +31,18 @@
     - name: Check cloned repos
       ansible.builtin.shell: |
         echo "local=$(test -d /local && echo OK || echo MISSING)"
-        echo "linux=$(test -d /local/eTran-linux/.git && echo OK || echo MISSING)"
+        echo "linux=$(test -d /local/linux/.git && echo OK || echo MISSING)"
         echo "homamodule=$(test -d /local/HomaModule/.git && echo OK || echo MISSING)"
       register: repos
       changed_when: false
 
     - name: Check kernel build artifacts
       ansible.builtin.shell: |
-        echo "config=$(test -f /local/eTran-linux/.config && echo OK || echo MISSING)"
-        echo "vmlinux=$(test -f /local/eTran-linux/vmlinux && echo OK || echo MISSING)"
-        echo "boot=$(test -f /boot/vmlinuz-6.6.0 && echo OK || echo MISSING)"
+        echo "config=$(test -f /local/linux/.config && echo OK || echo MISSING)"
+        echo "vmlinux=$(test -f /local/linux/vmlinux && echo OK || echo MISSING)"
+        echo "boot=$(test -f /boot/vmlinuz-6.17.8 && echo OK || echo MISSING)"
         echo "headers=$(test -d /usr/include/linux && echo OK || echo MISSING)"
-        echo "modules=$(test -d /lib/modules/6.6.0 && echo OK || echo MISSING)"
+        echo "modules=$(test -d /lib/modules/6.17.8 && echo OK || echo MISSING)"
       register: kernel
       changed_when: false
 
@@ -51,7 +51,7 @@
         cmd: uname -r
       register: uname_r
       changed_when: false
-      failed_when: "'6.6.0' not in uname_r.stdout"
+      failed_when: "'6.17.8' not in uname_r.stdout"
 
     - name: Check Homa installation
       ansible.builtin.shell: |

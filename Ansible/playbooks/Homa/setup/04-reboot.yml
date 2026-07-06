@@ -7,10 +7,10 @@
       ansible.builtin.reboot:
         reboot_timeout: 600
 
-    - name: Verify kernel version is 6.6
+    - name: Verify kernel version is 6.17.8
       ansible.builtin.command: uname -r
       register: kernel_version
-      failed_when: "'6.6' not in kernel_version.stdout"
+      failed_when: "'6.17.8' not in kernel_version.stdout"
 
     - name: Report kernel version
       ansible.builtin.debug:

@@ -13,7 +13,16 @@
 
 
 
-    - name: Clone HomaModule (latest master, tracks whatever kernel Ubuntu 24.04 ships)
+    - name: Clone vanilla Linux kernel source (v6.17.8)
+      ansible.builtin.git:
+        repo: https://github.com/gregkh/linux
+        dest: /local/linux
+        version: v6.17.8
+        depth: 1
+      become: true
+      become_user: "{{ ansible_user }}"
+
+    - name: Clone HomaModule (latest master, tracks kernel 6.17.8)
       ansible.builtin.git:
         repo: https://github.com/PlatformLab/HomaModule
         dest: /local/HomaModule
