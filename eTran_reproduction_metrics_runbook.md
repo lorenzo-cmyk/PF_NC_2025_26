@@ -28,8 +28,8 @@
 | 18 | TCP KV throughput | **~1.0 Mops peak / ~0.73 Mops steady aggregate** (5 clients, 4 threads, 16 pending, default 20 queues) | 2.4-4.8× Linux | — | Raw number captured; ratio needs Linux-TCP baseline |
 | 19 | TCP KV P50 latency | **14 µs** | 17.2 µs | **122%** | Beats paper target |
 | 20 | TCP KV P99 latency | **16 µs** | 27.5 µs | **172%** | Beats paper target |
-| 21 | TCP CPU cycles/req | **~2.9 kcycles** | 4.37 kcycles | — | Client-side only (rough) |
-| 22 | Homa CPU cycles/req | **~1213 kcycles** | 5.48 kcycles | — | AF_XDP busy-poll inflation |
+| 21 | TCP CPU cycles/req | **~2.9 kcycles** (2026-07-06, ~880 Kops, 63.8B cycles) | 4.37 kcycles | — | Client-side only (includes idle epoll_wait); paper is server under NAPI stress |
+| 22 | Homa CPU cycles/req | **~1357 kcycles** (2026-07-06, 50.9B cycles, 1MB) | 5.48 kcycles | — | AF_XDP busy-poll inflation (99.6% idle); active ~5 kcycles matches paper |
 
 **Key findings:**
 - **Homa data path is FASTPATH — microkernel is NOT on it** (verified in
@@ -695,12 +695,12 @@ sudo perf report --stdio --sort=comm,dso,symbol,dso_from,symbol_from
 > The microkernel's AF_XDP busy-poll is unaffected by perf on the application side.
 > For cycle-accurate measurement on the server, run perf stat on the server process.
 
-**Result** (previous session, 20s perf run at ~885 Kops throughput): 50.7B cycles,
-75.5B instructions (1.49 IPC), 1,741 context-switches, 2 CPU migrations.
-Cycles/request ≈ **~2.9 kcycles** (client-side only — includes active sending +
-idle epoll_wait cycles). Paper's 4.37 kcycles is server-side under NAPI stress;
-not directly comparable. Current metric 13 throughput (~970 Kops) would give
-~2.6 kcycles. For a proper measurement, run `perf stat` on the **server** process.
+**Result** (2026-07-06, default 20 queues, 25s perf run at ~880 Kops throughput):
+63.8B cycles, 94.8B instructions (1.49 IPC), 2,244 context-switches, 0 CPU
+migrations. Cycles/request ≈ **~2.9 kcycles** (client-side only — includes
+active sending + idle epoll_wait cycles). Paper's 4.37 kcycles is server-side
+under NAPI stress; not directly comparable. For a proper measurement, run
+`perf stat` on the **server** process.
 
 ### 22. eTran - Homa | Total CPU cycles per request | 5.48 kcycles | 2-Node CPU Profiling
 
@@ -717,12 +717,14 @@ perf stat -e cycles,instructions,context-switches,cpu-migrations,page-faults \
   --one-way
 ```
 
-**Result**: 37.8B cycles, 69.8B instructions over 15s (~16.6 Gbps throughput).
-Cycles/request ~1,213 kcycles (dominated by AF_XDP idle polling). Active processing
-estimated at ~5 kcycles/request. Paper's 5.48 kcycles measured on kernel Homa module
-(no busy polling). Only Metric 22 (Homa) is blocked by `perf` interference — Homa's
-AF_XDP busy-poll stalls under sampling interrupts. For cycle-accurate measurement,
-run without perf and estimate: active cycles ≈ total_cycles × (active_us / elapsed_us).
+**Result** (2026-07-06, default 20 queues, 20s perf run at ~15-16 Gbps throughput):
+50.9B cycles, 89.9B instructions (1.77 IPC), 2,055 context-switches, 16 CPU
+migrations. Cycles/request ≈ **~1357 kcycles** (dominated by AF_XDP idle polling).
+Active processing estimated at ~5 kcycles/request. Paper's 5.48 kcycles measured
+on kernel Homa module (no busy polling). Only Metric 22 (Homa) is blocked by
+`perf` interference — Homa's AF_XDP busy-poll stalls under sampling interrupts.
+For cycle-accurate measurement, run without perf and estimate: active cycles ≈
+total_cycles × (active_us / elapsed_us).
 
 ---
 
