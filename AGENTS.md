@@ -22,9 +22,11 @@ Every metric run follows this exact sequence:
 
 ```bash
 # 1. Kill everything on all involved nodes
-#    IMPORTANT: never use `pkill -f micro_kernel` -- it matches the
-#    pkill command's own cmdline and self-terminates before signalling
-#    the targets. Kill by PID via pgrep -x.
+#    IMPORTANT: never use `pkill -f micro_kernel` -- with `-f` it matches
+#    on the full command line, so it also hits the `screen` wrapper whose
+#    argv contains "micro_kernel" (and historically self-terminated if the
+#    pkill cmdline happened to contain the substring). Use `pgrep -x` to
+#    match on the process name only.
 for n in node0 node1 node2 ...; do
   ssh $n "for p in \$(pgrep -x micro_kernel) \$(pgrep -x cp_node); do \
       sudo kill -9 \$p 2>/dev/null; done; \
