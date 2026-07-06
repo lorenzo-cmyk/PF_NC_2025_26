@@ -25,7 +25,7 @@
 | 13 | TCP 1KB throughput | **~7.95 Gbps**, ~970 Kops (single-threaded, default 20 queues) | 4.8× Linux | — | Raw number captured; ratio needs Linux-TCP baseline |
 | 14 | TCP 2KB throughput | **~11.79 Gbps**, ~719 Kops (single-threaded, default 20 queues) | 0.87× TAS | — | Raw number captured; ratio needs TAS baseline |
 | 15 | TCP 1K persistent conns, 64B | **~1129 Kops peak / ~655 K steady aggregate** (10-thr server, 5 clients × 200 conns, default 20 queues) | 2.26× Linux | — | Connection drop after ~9s limits window. Per-client steady ~160-170 Kops each. Env vars must be inside `script -q -c` argument (not as prefix) |
-| 18 | TCP KV throughput | **0.89 Mops peak / 0.72 M steady aggregate** (5 clients, 4 threads, 16 pending, CP_CPU=19 working) | 2.4-4.8× Linux | — | Raw number captured; ratio needs Linux-TCP baseline |
+| 18 | TCP KV throughput | **~1.0 Mops peak / ~0.73 Mops steady aggregate** (5 clients, 4 threads, 16 pending, default 20 queues) | 2.4-4.8× Linux | — | Raw number captured; ratio needs Linux-TCP baseline |
 | 19 | TCP KV P50 latency | **14 µs** | 17.2 µs | **122%** | Beats paper target |
 | 20 | TCP KV P99 latency | **16 µs** | 27.5 µs | **172%** | Beats paper target |
 | 21 | TCP CPU cycles/req | **~2.9 kcycles** | 4.37 kcycles | — | Client-side only (rough) |
@@ -634,9 +634,10 @@ Output: `TP: total=<mops> mops  50p=<us> 90p=<us> 95p=<us> 99p=<us> 99.9p=<us> 9
 > informational only; `timeout 45` provides the actual 30s run + 5s warmup + buffer.
 > Server port is hardcoded to **11211** (memcached).
 
-**Result**: **~0.89 Mops peak / ~0.72 Mops steady aggregate** (5 clients,
-4 threads each, 10 conns, 16 pending). P50=61 µs, P95=133 µs, P99=202 µs,
-P99.9=322 µs, P99.99=454 µs. No SIGABRT — flexkvs works end-to-end.
+**Result** (2026-07-06, default 20 queues): **~1.0 Mops peak / ~0.73 Mops
+steady aggregate** (5 clients, 4 threads each, 10 conns, 16 pending).
+Per-client latency under load: P50≈260 µs, P99≈315 µs.
+No SIGABRT — flexkvs works end-to-end.
 
 ### 19. eTran - TCP | KV P50 latency, under-loaded | 17.2 µs | 6-Node
 
@@ -658,15 +659,17 @@ timeout 20 env ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=1 ETRAN_NR_NIC_QUEUES=1 \
 ```
 Read P50 µs from output (`50p=<us>`).
 
-**Result**: **14 µs P50** (beats paper's 17.2 µs). 0.067 Mops at 1 pending RPC.
-P90=16 µs, P99=16 µs, P99.9=18 µs, P99.99=187 µs. Stable across 40+ measurements.
+**Result** (2026-07-06, default 20 queues): **14 µs P50** (beats paper's 17.2 µs).
+0.067 Mops at 1 pending RPC. P90=16 µs, P99=16 µs, P99.9=18 µs, P99.99=187 µs.
+Stable across 20+ measurements. Confirmed identical to previous session — latency
+unaffected by queue count or IRQ config.
 
 ### 20. eTran - TCP | KV P99 latency, under-loaded | 27.5 µs | 6-Node
 
 Same command as #19. Read P99 µs from output (`99p=<us>`).
 
-**Result**: **16 µs P99** (beats paper's 27.5 µs). Tight latency distribution —
-all in the 14-18 µs range up to P99.9.
+**Result** (2026-07-06, default 20 queues): **16 µs P99** (beats paper's 27.5 µs).
+Tight latency distribution — all in the 14-18 µs range up to P99.9.
 
 ### 21. eTran - TCP | Total CPU cycles per request | 4.37 kcycles | 2-Node CPU Profiling
 
