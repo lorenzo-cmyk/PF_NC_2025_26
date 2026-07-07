@@ -270,11 +270,27 @@ wait
   mk's `CP_CPU=19` (SMT sibling of core 9) is online and the internal
   `pthread_setaffinity_np` succeeds. This matches the paper's design (§6).
 - C-states=off (`intel_idle.max_cstate=0`), ASPM=off — required for sub-15µs latency metrics
+- CPU governor=`performance` (via tuned `network-throughput` profile).
+  irqbalance systemd-disabled, `cpupower idle-set -D 1` (covered by
+  `intel_idle.max_cstate=0` in GRUB).
+  Reference: cloudlab_env_setup `configure_for_exp`.
+- The full CloudLab `configure_for_exp` recipe was applied item-by-item and
+  measured against metrics 1/3/5. Most items (eBPF stats off, KSM off, NUMA
+  balancing off, LRO off) had **no measurable effect**. **Turbo off
+  (`no_turbo=1`) and GRO/TSO off are NOT applied** — they cause a 39%
+  regression on metric 5 (927 → 568 Kops) because Homa's per-RPC CPU
+  processing is the bottleneck, not the link. The earlier
+  `tuning/05-runtime-tuning.yml` playbook that applied these was
+  **removed** — see the runbook section
+  "System Tuning — What We Tried, What Actually Matters" for the full
+  table and rationale, and **do not waste time re-adding it**.
 
 ## Ansible playbook structure
 - `Ansible/playbooks/eTran/setup/` — one-time: system deps, kernel build, install eTran
 - `Ansible/playbooks/eTran/tuning/` — one-time (persists reboot): mitigations off, C-states off, ASPM off, tuned
-  (SMT is now ON — `nosmt` removed; playbook renamed `02-tune-boot-params.yml`)
+  (SMT is now ON — `nosmt` removed; playbook renamed `02-tune-boot-params.yml`).
+  Note: a `05-runtime-tuning.yml` was tried and removed; see the
+  "System Tuning" section in the runbook.
 - `Ansible/playbooks/eTran/evaluation/` — per-session (run after EVERY reboot): ARP, hosts, NIC tuning, MTU, verify
 
 ## Ansible inventory
