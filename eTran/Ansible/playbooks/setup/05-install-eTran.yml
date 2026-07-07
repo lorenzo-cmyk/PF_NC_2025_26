@@ -2,17 +2,27 @@
 - name: eTran node setup — install and compile eTran
   hosts: all
   tasks:
+    - name: Check if bpftool/llvm were installed
+      ansible.builtin.stat:
+        path: /local/eTran/.install-sh-done
+      register: install_sh_done
+
     - name: Install bpftool and llvm
       become: true
       ansible.builtin.shell:
         cmd: bash install.sh && touch /local/eTran/.install-sh-done
         chdir: /local/eTran
-        creates: /local/eTran/.install-sh-done
+      when: not install_sh_done.stat.exists
+
+    - name: Check if eTran was built
+      ansible.builtin.stat:
+        path: /local/eTran/.eTran-built
+      register: etran_built
 
     - name: Configure and compile eTran
       ansible.builtin.shell:
         cmd: ./configure && make -C eTran && touch /local/eTran/.eTran-built
         chdir: /local/eTran
-        creates: /local/eTran/.eTran-built
       become: true
       become_user: "{{ ansible_user }}"
+      when: not etran_built.stat.exists
