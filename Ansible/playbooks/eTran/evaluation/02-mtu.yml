@@ -1,10 +1,10 @@
 ---
-- name: eTran evaluation — set MTU
+- name: eTran evaluation — set MTU (default 1500, no-op unless overridden)
   hosts: all
   become: true
   gather_facts: false
   vars:
-    mtu: 9000
+    mtu: 1500
     iface: ens1f1np1
   tasks:
     - name: Set MTU on primary interface

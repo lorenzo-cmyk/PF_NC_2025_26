@@ -4,13 +4,15 @@
   tasks:
     - name: Install bpftool and llvm
       become: true
-      ansible.builtin.command:
-        cmd: bash install.sh
+      ansible.builtin.shell:
+        cmd: bash install.sh && touch /local/eTran/.install-sh-done
         chdir: /local/eTran
+        creates: /local/eTran/.install-sh-done
 
     - name: Configure and compile eTran
       ansible.builtin.shell:
-        cmd: ./configure && make -C eTran
+        cmd: ./configure && make -C eTran && touch /local/eTran/.eTran-built
         chdir: /local/eTran
+        creates: /local/eTran/.eTran-built
       become: true
       become_user: "{{ ansible_user }}"

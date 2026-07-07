@@ -14,6 +14,7 @@
       ansible.builtin.shell:
         cmd: yes "" | make -j$(nproc)
         chdir: /local/eTran-linux
+        creates: /local/eTran-linux/vmlinux
       become: true
       become_user: "{{ ansible_user }}"
       async: 7200
@@ -24,15 +25,18 @@
       ansible.builtin.shell:
         cmd: make modules_install -j$(nproc)
         chdir: /local/eTran-linux
+        creates: /lib/modules/6.6.0-eTran+/modules.dep
 
     - name: Install kernel
       become: true
       ansible.builtin.shell:
         cmd: make install -j$(nproc)
         chdir: /local/eTran-linux
+        creates: /boot/vmlinuz-6.6.0-eTran+
 
     - name: Install kernel headers
       become: true
       ansible.builtin.shell:
-        cmd: make headers_install INSTALL_HDR_PATH=/usr
+        cmd: make headers_install INSTALL_HDR_PATH=/usr && touch /local/eTran-linux/.eTran-headers-installed
         chdir: /local/eTran-linux
+        creates: /local/eTran-linux/.eTran-headers-installed

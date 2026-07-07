@@ -10,12 +10,23 @@
         owner: "{{ ansible_user }}"
         mode: "0755"
 
+    - name: Check if eTran-linux is already cloned
+      ansible.builtin.stat:
+        path: /local/eTran-linux/.git
+      register: etran_linux_repo
+
     - name: Clone eTran-linux
       ansible.builtin.git:
         repo: https://github.com/eTran-NSDI25/eTran-linux
         dest: /local/eTran-linux
       become: true
       become_user: "{{ ansible_user }}"
+      when: not etran_linux_repo.stat.exists
+
+    - name: Check if eTran is already cloned
+      ansible.builtin.stat:
+        path: /local/eTran/.git
+      register: etran_repo
 
     - name: Clone eTran
       ansible.builtin.git:
@@ -23,3 +34,4 @@
         dest: /local/eTran
       become: true
       become_user: "{{ ansible_user }}"
+      when: not etran_repo.stat.exists
