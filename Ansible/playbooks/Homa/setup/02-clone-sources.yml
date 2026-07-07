@@ -1,0 +1,33 @@
+---
+- name: HOME node setup — clone source repositories
+  hosts: all
+  tasks:
+
+    - name: Create /local owned by the ansible user
+      become: true
+      ansible.builtin.file:
+        path: /local
+        state: directory
+        owner: "{{ ansible_user }}"
+        mode: "0755"
+
+
+
+    - name: Clone vanilla Linux kernel source (v6.17.8)
+      ansible.builtin.git:
+        repo: https://github.com/gregkh/linux
+        dest: /local/linux
+        version: v6.17.8
+        depth: 1
+      become: true
+      become_user: "{{ ansible_user }}"
+
+    - name: Clone HomaModule (tracks kernel 6.17.8)
+      ansible.builtin.git:
+        repo: https://github.com/PlatformLab/HomaModule
+        dest: /local/HomaModule
+        version: main
+      become: true
+      become_user: "{{ ansible_user }}"
+
+

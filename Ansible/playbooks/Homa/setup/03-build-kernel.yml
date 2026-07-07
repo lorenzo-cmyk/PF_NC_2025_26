@@ -1,0 +1,38 @@
+---
+- name: Homa node setup — configure, compile and install vanilla Linux 6.17.8
+  hosts: all
+  tasks:
+    - name: Copy verified kernel .config to build tree
+      ansible.builtin.copy:
+        src: /Users/pierluigigrossi/Documents/PF_NC_REBORN/Ansible/files/kernel-config
+        dest: /local/linux/.config
+        owner: "{{ ansible_user }}"
+        mode: "0644"
+      become: true
+
+    - name: Compile kernel (async, may take a while)
+      ansible.builtin.shell:
+        cmd: yes "" | make -j$(nproc)
+        chdir: /local/linux
+      become: true
+      become_user: "{{ ansible_user }}"
+      async: 7200
+      poll: 30
+
+    - name: Install kernel modules
+      become: true
+      ansible.builtin.shell:
+        cmd: make modules_install -j$(nproc)
+        chdir: /local/linux
+
+    - name: Install kernel
+      become: true
+      ansible.builtin.shell:
+        cmd: make install -j$(nproc)
+        chdir: /local/linux
+
+    - name: Install kernel headers
+      become: true
+      ansible.builtin.shell:
+        cmd: make headers_install INSTALL_HDR_PATH=/usr
+        chdir: /local/linux

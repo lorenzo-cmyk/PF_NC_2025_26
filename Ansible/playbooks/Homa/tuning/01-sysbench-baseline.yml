@@ -1,0 +1,33 @@
+---
+- name: eTran node tuning — sysbench baseline
+  hosts: all
+  become: true
+  tasks:
+    - name: Install sysbench
+      ansible.builtin.apt:
+        name: sysbench
+        state: present
+
+    - name: Run single-threaded CPU benchmark
+      ansible.builtin.command:
+        cmd: sysbench cpu run
+      register: sysbench_st
+      changed_when: false
+
+    - name: Run multi-threaded CPU benchmark
+      ansible.builtin.shell:
+        cmd: sysbench --threads=$(nproc) cpu run
+      register: sysbench_mt
+      changed_when: false
+
+    - name: Single-threaded results
+      ansible.builtin.debug:
+        msg:
+          - "=== {{ inventory_hostname }} single-thread ==="
+          - "{{ sysbench_st.stdout_lines }}"
+
+    - name: Multi-threaded results
+      ansible.builtin.debug:
+        msg:
+          - "=== {{ inventory_hostname }} multi-thread ==="
+          - "{{ sysbench_mt.stdout_lines }}"

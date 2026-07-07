@@ -1,0 +1,32 @@
+---
+- name: eTran node tuning — install and enable tuned
+  hosts: all
+  become: true
+  tasks:
+    - name: Install tuned
+      ansible.builtin.apt:
+        name: tuned
+        state: present
+
+    - name: Enable and start tuned service
+      ansible.builtin.systemd:
+        name: tuned
+        enabled: true
+        state: started
+
+    - name: Apply network-throughput profile
+      ansible.builtin.command:
+        cmd: tuned-adm profile network-throughput
+      register: tuned_profile
+      changed_when: false
+
+    - name: Verify active profile
+      ansible.builtin.command:
+        cmd: tuned-adm active
+      register: tuned_active
+      changed_when: false
+
+    - name: Tuned status
+      ansible.builtin.debug:
+        msg:
+          - "{{ inventory_hostname }}: profile={{ tuned_active.stdout }}"

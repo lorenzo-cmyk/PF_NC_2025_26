@@ -1,0 +1,22 @@
+---
+- name: Homa node setup — install and compile Homa
+  hosts: all
+  vars:
+    homa_num_nodes: "{{ groups['all'] | length }}"
+    homa_first_node: 1
+  tasks:
+    - name: Build the Homa kernel module and utilities
+      ansible.builtin.shell:
+        cmd: make all && make -C util
+        chdir: /local/HomaModule
+      become: true
+      become_user: "{{ ansible_user }}"
+
+    - name: Load the Homa kernel module
+      become: true
+      ansible.builtin.command:
+        cmd: insmod homa.ko
+        chdir: /local/HomaModule
+      register: homa_insmod
+      failed_when: homa_insmod.rc != 0 and 'File exists' not in homa_insmod.stderr
+      changed_when: homa_insmod.rc == 0
