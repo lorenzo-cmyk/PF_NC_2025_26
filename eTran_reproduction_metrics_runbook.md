@@ -945,6 +945,9 @@ Homa, default 20 queues, SMT=ON, CP_CPU=19.
 | `ethtool -K gro off` (on top of above) | n/a | n/a | already at 568 | n/a — see below |
 | `ethtool -K tso off` (on top) | n/a | n/a | n/a | n/a — see below |
 | **Reverted Turbo + GRO + TSO, kept all others** | 12.51–12.55 µs | 12.79 Gbps | 928 Kops | final state |
+| `taskset -c 0-9 ./cp_node ...` (process-level, app threads to physical cores 0-9) | 12.5 µs | 12.8 Gbps | 928 Kops | no effect — mk pins app threads internally |
+| `ethtool -G ens1f1np1 rx 4096 tx 4096` (bigger NIC ring buffers) | 12.5 µs | 12.8 Gbps | 928 Kops | no effect — bursts already absorbed |
+| 2M hugepages for AF_XDP UMEM (THP+madvise / explicit hugepage reservation) | 12.5 µs | 12.8 Gbps | 928 Kops | no effect — mk sets up hugepages internally |
 
 (Cells with `⬇` are statistically significant regressions. Other rows
 are within run-to-run noise of ±0.1 µs / ±0.1 Gbps / ±30 Kops.)
