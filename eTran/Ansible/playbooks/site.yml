@@ -1,0 +1,7 @@
+---
+- name: eTran full system setup
+  import_playbook: setup/site.yml
+- name: eTran full system tuning
+  import_playbook: tuning/site.yml
+- name: eTran full evaluation prep
+  import_playbook: evaluation/site.yml
