@@ -5,15 +5,15 @@
 Reboot resets: ARP table, /etc/hosts, NIC coalescing, flow control, queue count, MTU.
 
 ```bash
-# All ansible-playbook commands run from Ansible/ directory:
-cd Ansible
+# All ansible-playbook commands run from eTran/Ansible/ directory:
+cd eTran/Ansible
 
 # Required after every reboot:
-.venv/bin/ansible-playbook playbooks/eTran/evaluation/01-network-prep.yml
-.venv/bin/ansible-playbook playbooks/eTran/evaluation/03-verify-network.yml
+.venv/bin/ansible-playbook playbooks/evaluation/01-network-prep.yml
+.venv/bin/ansible-playbook playbooks/evaluation/03-verify-network.yml
 
 # Optional: MTU (default 1500, skip for standard runs)
-# .venv/bin/ansible-playbook playbooks/eTran/evaluation/02-mtu.yml --extra-vars 'mtu=9000'
+# .venv/bin/ansible-playbook playbooks/evaluation/02-mtu.yml --extra-vars 'mtu=9000'
 ```
 
 ## Critical procedure for running benchmarks
@@ -286,12 +286,12 @@ wait
   table and rationale, and **do not waste time re-adding it**.
 
 ## Ansible playbook structure
-- `Ansible/playbooks/eTran/setup/` — one-time: system deps, kernel build, install eTran
-- `Ansible/playbooks/eTran/tuning/` — one-time (persists reboot): mitigations off, C-states off, ASPM off, tuned
+- `eTran/Ansible/playbooks/setup/` — one-time: system deps, kernel build, install eTran
+- `eTran/Ansible/playbooks/tuning/` — one-time (persists reboot): mitigations off, C-states off, ASPM off, tuned
   (SMT is now ON — `nosmt` removed; playbook renamed `02-tune-boot-params.yml`).
   Note: a `05-runtime-tuning.yml` was tried and removed; see the
   "System Tuning" section in the runbook.
-- `Ansible/playbooks/eTran/evaluation/` — per-session (run after EVERY reboot): ARP, hosts, NIC tuning, MTU, verify
+- `eTran/Ansible/playbooks/evaluation/` — per-session (run after EVERY reboot): ARP, hosts, NIC tuning, MTU, verify
 
 ## Ansible inventory
 - `@server` = node0, `@clients` = node1–node9
