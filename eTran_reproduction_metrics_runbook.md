@@ -1175,6 +1175,83 @@ detail.
 
 ---
 
+## Tried and Reverted — Earlier Tuning Experiments
+
+This section documents tunables and operational patterns from earlier
+sessions that were tried, found to be no-ops or harmful, and reverted.
+**Do not re-attempt these.** Git history has the detailed rationale
+(commits 4b0aa50, 9b7b73d, 64502bf, 197bdf3, 82fdecf, 8dcc52d, b878a4d).
+
+### Reverted (active regressions)
+
+These caused measurable harm and were rolled back:
+
+| Tweak | Effect | Reverted in |
+|---|---|---|
+| `ethtool -K gro off` | metric 5: 927 → 568 Kops (39% ↓) | runbook table line 945 |
+| `ethtool -K tso off` | part of the same "disable everything" anti-pattern | runbook table line 946 |
+| `intel_pstate/no_turbo=1` | metric 5: 927 → 568 Kops (39% ↓) | runbook table line 944 |
+| `--queues N` on `cp_node client` | 1045 → 86 Kops (12× ↓) | AGENTS.md "What NOT to do" |
+
+### Obsolete workarounds (pre-HT-on, all reverted)
+
+When we ran with `nosmt` (SMT=off), `CP_CPU=19` was offline, the
+internal pin silently failed, and `control_loop` roamed. The
+workarounds below were tried, then obsoleted by enabling HT-on
+in commit 64502bf:
+
+| Tweak | Status | Replaced by |
+|---|---|---|
+| `taskset -c 9 ./micro_kernel` (manual pin) | obsolete | `CP_CPU=19` internal pin works with HT-on |
+| `taskset -c 0-7 ./cp_node server` | obsolete | no taskset needed (mk pins app threads internally per runbook table line 948) |
+| `-q 10` for micro_kernel | obsolete | default 20 queues (matches NIC combined) |
+| `02-irq-affinity.yml` (manual queue + IRQ pin) | removed | queue pinning proven pointless for metric 5 |
+| `02-disable-smt-mitigations.yml` (adds `nosmt`) | renamed | `02-tune-boot-params.yml` (now enables HT) |
+| VLAN interface MTU (10.0.1.x range) | removed | not relevant to our setup |
+
+### Earlier runbook/AGENTS.md mistakes (already corrected in commit history)
+
+- `--workload 524288` for 500KB RPCs → use `500000` (was 512KiB, not 500KB)
+- `ETRAN_NR_APP_THREADS=1` for metric 18 → use `4` (matches `--threads 4`)
+- `profile.py node_count=4` → `10` (matches actual deployment)
+- `metric 6 --client-max 128` → `256` (unified with actual measured)
+
+### Operational anti-patterns
+
+Repeated from AGENTS.md "What NOT to do" so this runbook is
+self-contained as a reference:
+
+- **`pkill -f micro_kernel`** — matches its own cmdline AND the `screen`
+  wrapper argv, self-terminates before reaching the target. Use
+  `pgrep -x micro_kernel` + `kill -9 <pid>`.
+- **`nohup ... </dev/null`** for micro_kernel — the monitor thread exits
+  on stdin EOF. Use `screen -dmS` (provides a pty).
+- **`timeout` on micro_kernel or server** — they should persist across
+  runs. Wrap them in `screen`. Only clients use `timeout`.
+- **`screen -wipe`** — hangs on stale `.lock` files in
+  `/run/screen/S-root` from crashed mk. Use `screen -ls` / kill by PID.
+- **Skipping shm cleanup** between metrics — mandatory
+  `rm -f /dev/shm/BufferPool_* /dev/shm/UMEM_* /dev/shm/LRPC_*` to
+  avoid silent BPF state stalls.
+- **`-b` (busy-poll) on micro_kernel** — breaks Homa AF_XDP timing.
+- **Doubling `umem_num_frames`** — doesn't help, causes overhead.
+- **Resending SIGKILL to a D-state mk** — won't work; BPF syscalls are
+  uninterruptible. If the affected node is critical, swap it with
+  another clean node instead of rebooting the cluster.
+
+### Already documented elsewhere in this runbook
+
+- The cumulative tuning table (lines 935-950) covers the CloudLab
+  `configure_for_exp` recipe + 3 process-level no-effect items added
+  in this session.
+- The "Beyond `configure_for_exp`" section covers ntuple, napi,
+  set_irq_affinity, NIC offloads, hugepages, kernel version.
+- "Where the +50% would have to come from" identifies the upstream
+  eBPF bottlenecks (XDP_GEN grant chain, BPF map contention) that OS
+  tunings cannot fix.
+
+---
+
 ## Known Limitations
 
 1. **Short-lived TCP connections (metrics #16–17)** — Not supported by any
