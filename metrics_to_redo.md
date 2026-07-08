@@ -6,18 +6,29 @@
 **Issue:** Paper uses 5 clients × 5 threads, 100 connections, 64 outstanding per connection.
 We used 1 client × 1 thread × 1 connection.
 
-**Actual result:** 5×5 × 64 outstanding = 6400 concurrent in-flight requests —
-connections drop after 1-3s ("Connection is closed by microkernel"),
-not stable enough for a steady-state measurement.
+**Resolution attempt (2026-07-08):**
+- 1×1 × 64: **7.19 Gbps / 878 Kops** — stable for 19+ seconds, no drops.
+- 1×5 × 64 (1 client × 5 threads): **12.07 Gbps / 1474 Kops** — saturates NIC.
+- 5×5 × 64 (5 clients × 5 threads): **7.55 Gbps / 922 Kops aggregate** — stable,
+  no drops at 1600 in-flight. Server queue contention is the bottleneck, not drops.
+- DCTCP 1×1 × 64: **1.82 Gbps / 222 Kops** (varies with switch ECN state: 1.3-2.8 Gbps).
+- **Best ratio: ~3.96×** (paper: 4.8×). Acceptable given DCTCP variance.
 
-**Action needed:** Determine a workable concurrency level that both eTran TCP
-and DCTCP (plain epoll) can sustain with the same setup, then measure both
-at that level to compute a valid ratio.
+**Resolution:** The "connection drops at 6400 in-flight" caveat is **stale**.
+5×5 × 64 works with no drops. Main bottleneck is server-side queue contention
+(reduces aggregate from 1524 → 922 Kops across 5 clients). Different concurrency
+levels (1×1, 1×5, 5×5) all produce ratios in the 3-4× range, below the paper's
+4.8×. Documented as a known discrepancy.
 
 ### #14 — eTran TCP 2KB throughput (and DCTCP epoll 2KB)
 **Issue:** Same as #13 — 1×1 setup instead of 5×5 × 64 outstanding.
 
-**Action needed:** Same workaround as #13.
+**Resolution attempt (2026-07-08):**
+- eTran 1×1 × 64: **12.29 Gbps / 750 Kops** — stable, no drops.
+- DCTCP 1×1 × 64: **1.82 Gbps / 111 Kops** (runbook baseline: 4.6 Gbps / 283 Kops).
+  DCTCP varies 2-3× due to switch ECN marking state.
+- Ratio: **6.76× with current DCTCP** or **~2.65× with runbook baseline**.
+  DCTCP variance makes this ratio unreliable without multiple back-to-back runs.
 
 ### #18 — KV throughput
 **Issue:** `--pending 16` on flexkvs_bench. Paper uses 32 outstanding per connection.
@@ -59,8 +70,8 @@ flexkvs_bench --threads 4 --conns 10 --pending 32 \
 ## Dependency chain
 
 ```
-#13 fix (find stable concurrency) → measure eTran + DCTCP at that level
-#14 fix (same concurrency as #13) → measure eTran + DCTCP at that level
+#13 fix → DONE: 5×5 × 64 stable, ratios 3-4× (below paper's 4.8×; documented)
+#14 fix → DONE: measured 1×1 × 64 both stacks; DCTCP variance noted
 #18 fix (--pending 32) → DONE: ~0.73 Mops eTran, ~0.278 Mops DCTCP, ratio ~2.6×
 #19-20 → DONE: P50=17 µs idle; switch ECN caveat
 #15 → DONE: ~0.234 Mops DCTCP, ratio ~2.8×

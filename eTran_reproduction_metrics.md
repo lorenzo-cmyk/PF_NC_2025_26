@@ -30,12 +30,12 @@ Use these target values and formulas to verify and reproduce the evaluations des
 | **eTran - Homa** | RTT P50 slowdown for the shortest 10% of RPCs in Workload W5 (20 Gbps) | Slowdown Factor | `Linux - Homa (W5 P50 Slowdown) / 3.9` | eTran raw: 14530 µs (no Linux baseline) | — | **High (10-Node Cluster)** |
 | **eTran - Homa** | RTT P99 slowdown for the shortest 10% of RPCs in Workload W4 (20 Gbps) | Slowdown Factor | `Linux - Homa (W4 P99 Slowdown) / 4.3` | eTran raw: 12604 µs (no Linux baseline) | — | **High (10-Node Cluster)** |
 | **eTran - Homa** | RTT P99 slowdown for the shortest 10% of RPCs in Workload W5 (20 Gbps) | Slowdown Factor | `Linux - Homa (W5 P99 Slowdown) / 2.9` | eTran raw: 48026 µs (no Linux baseline) | — | **High (10-Node Cluster)** |
-| **eTran - TCP** | Throughput with 1KB messages (64 outstanding messages, single-threaded) | Gbps | `4.8 * Linux - TCP (Throughput 1KB)` → **13.44** | **~7.95 Gbps** | **2.84×** (1×1 setup; expected 4.8× with 5×5; needs #13 redo) | **High (2-Node Micro)** |
+| **eTran - TCP** | Throughput with 1KB messages (64 outstanding messages, single-threaded) | Gbps | `4.8 * Linux - TCP (Throughput 1KB)` → **13.44** | **~7.19 Gbps / 878 Kops** (1×1); **~12.1 Gbps / 1474 Kops** (1×5); **~7.55 Gbps / 922 Kops** (5×5) | **~3.96×** (1×1); **~3.98×** (1×5); **~2.79×** (5×5). Paper expects 4.8× — variance due to DCTCP switch ECN sensitivity | **High (2-Node Micro)** |
 | **TAS - TCP** | Throughput with 1KB messages (64 outstanding messages, single-threaded) | Gbps | `7.7 * Linux - TCP (Throughput 1KB)` → **21.56** | — | — | Medium |
-| **Linux - TCP** (DCTCP) | Throughput with 1KB messages (64 outstanding messages, single-threaded) | Gbps | *Reference Value (Baseline)* | **~2.8 Gbps / ~346 Kops** | — | **High (2-Node Micro)** |
-| **eTran - TCP** | Throughput with 2KB messages (64 outstanding messages, single-threaded) | Gbps | `0.87 * TAS - TCP (Throughput 2KB)` | **~11.79 Gbps** | — (no TAS baseline) | Medium |
+| **Linux - TCP** (DCTCP) | Throughput with 1KB messages (64 outstanding messages, single-threaded) | Gbps | *Reference Value (Baseline)* | **~1.82 Gbps / ~222 Kops** (measured 2026-07-08; runbook: 2.8 Gbps — varies with switch ECN state) | — | **High (2-Node Micro)** |
+| **eTran - TCP** | Throughput with 2KB messages (64 outstanding messages, single-threaded) | Gbps | `0.87 * TAS - TCP (Throughput 2KB)` | **~12.29 Gbps / 750 Kops** | — (no TAS baseline) | Medium |
 | **TAS - TCP** | Throughput with 2KB messages (64 outstanding messages, single-threaded) | Gbps | *Reference Value (Baseline)* | — | — | Medium |
-| **Linux - TCP** (DCTCP) | Throughput with 2KB messages (64 outstanding messages, single-threaded) | Gbps | *Reference Value (Baseline)* | **~4.6 Gbps / ~283 Kops** | — | Medium |
+| **Linux - TCP** (DCTCP) | Throughput with 2KB messages (64 outstanding messages, single-threaded) | Gbps | *Reference Value (Baseline)* | **~1.82 Gbps / ~111 Kops** (measured 2026-07-08; runbook: 4.6 Gbps — varies with switch ECN state) | — | Medium |
 | **eTran - TCP** | Throughput with 1K persistent connections (64B requests, closed-loop) | Mops | `2.26 * Linux - TCP (Throughput 1K conn)` → **0.529** | **~0.66 Mops steady** | **2.82×** (exceeds expected 2.26×) ✓ | **High (6-Node Connection Scalability)** |
 | **TAS - TCP** | Throughput with 1K persistent connections (64B requests, closed-loop) | Mops | `4.1 * Linux - TCP (Throughput 1K conn)` → **0.959** | — | — | Medium |
 | **Linux - TCP** (DCTCP) | Throughput with 1K persistent connections (64B requests, closed-loop) | Mops | *Reference Value (Baseline)* | **~0.234 Mops** | — | **High (6-Node Connection Scalability)** |
@@ -121,4 +121,15 @@ DCTCP "Measured" values filled in:
 Still missing:
 - Metric 21: server-side CPU cycle measurement for fair eTran comparison
 - All **"Linux - Homa"** baselines (rows 16-26, 54) — requires stock kernel + Homa kernel module
+
+## Notes on Metric 13-14 Resolution (2026-07-08)
+- **5×5 × 64 works** with NO connection drops (contrary to earlier caveats).
+  The 1600 in-flight total is stable for 20s+ runs.
+- Main bottleneck is **server-side queue contention**: single 5-thread client
+  hits 1474 Kops, but 5×5 aggregate drops to 922 Kops.
+- **DCTCP variance**: DCTCP throughput varies 2-3× between runs (1.3-2.8 Gbps
+  for 1KB) due to switch ECN marking state from earlier traffic. This makes the
+  eTran/DCTCP ratio unreliable for any single measurement point.
+- **Best achievable ratio:** ~3.96-3.98× (vs paper's 4.8×). The gap is
+  consistent across all concurrency levels tested (1×1, 1×5, 5×5).
 

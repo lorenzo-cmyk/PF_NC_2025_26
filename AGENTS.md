@@ -143,6 +143,10 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
   Linux-Homa baseline postponed. `--server-ports 4` (operational, matches the
   metric 3 invocation — not a hard cap; could try 5/7, see metric 3 notes).
 - Metrics 13-21: TCP benchmarks, use `script -q -c` over SSH for visible output
+- Metrics 13-14: 5×5 × 64 (1600 in-flight) is **stable with no drops** post-BPF XDP_EGRESS patch.
+  Optimal per-client config: 5 threads × 1 flow × 64 outstanding (`-t 5 -f 1 -o 64`).
+  Single client achieves ~12.1 Gbps / 1474 Kops; 5-client aggregate drops to ~922 Kops
+  (server-side queue contention). Best eTran/DCTCP ratio: ~3.96× (paper: 4.8×).
 - Metric 15: stagger clients 0.5s apart to avoid overwhelming server
 - Metrics 19-20: KV latency beats paper targets (14 vs 17.2 µs P50, 16 vs 27.5 µs P99)
 
@@ -174,8 +178,15 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
   is what `perf` sampling interrupts stall; mk's slow-path control_loop is
   unaffected and is not the relevant target of perf interference.
 - TCP connection drop after ~9s: "Connection is closed by microkernel" from
-  `lib/socket.cc:405`. The microkernel closes TCP state after idle. Benchmark
-  produces valid data before the drop. Use `timeout 15` for clean runs.
+  `lib/socket.cc:405`. **No longer reproducible with 5×5 × 64 (1600 in-flight)** —
+  runs 20s+ cleanly. The earlier drop may have been specific to older code before
+  the BPF XDP_EGRESS patch. Benchmark produces valid data even if drops occur.
+  Keep `timeout 15` for safety but the caveat is likely stale.
+- **DCTCP 1×1 × 64 throughput varies 2-3×** between runs (1.3-2.8 Gbps for 1KB,
+  1.8-4.6 Gbps for 2KB) due to switch ECN marking state from prior traffic.
+  This makes the eTran/DCTCP ratio unreliable for any single measurement point.
+  When reporting ratios, note the concurrent DCTCP baseline and compare against
+  the runbook's best-case DCTCP baseline for a fair comparison.
 - epoll_* and flexkvs output is hidden over SSH (C stdout buffering). Use
   `script -q -c 'command' /dev/null` to force line-buffered output.
   **Env vars must be inside the `-c` argument** — `env VAR=val script -q -c 'cmd'`

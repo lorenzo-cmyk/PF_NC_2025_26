@@ -569,10 +569,18 @@ env vars into the subshell. Use: `script -q -c 'VAR=val ./cmd' /dev/null`.
 > With `-s` on both: `short_response=false` → server echoes full request (used for latency).
 > Must match on client and server side.
 
-**Result** (2026-07-06, fresh reboot, default 20 queues): **~7.95 Gbps**, ~970 Kops.
-No SIGABRT. Connection drops after ~9s ("Connection is closed by microkernel" from
-`lib/socket.cc:405`) — microkernel closes TCP state, but benchmark produces valid
-data before that. Use `timeout 15` for a clean run before the drop.
+**Result** (2026-07-08, fresh reboot, default 20 queues): **~7.19 Gbps**, ~878 Kops
+(1×1 × 64, server 1t/1q). The earlier 7.95 Gbps / 970 Kops was within run-to-run
+noise (~10%). Connection drops after ~9s are **no longer observed** (~19s run
+completed cleanly) — likely resolved by the BPF XDP_EGRESS patch.
+
+**Scaled (5×5 × 64) result** — 5 clients × 5 threads × 1 flow × 64 outstanding:
+- **~7.55 Gbps aggregate**, ~922 Kops total (per-client ~178 Kops).
+- **No connection drops** at 1600 in-flight (contrary to the old "6400 drops" caveat).
+- Single 5-thread client saturates at **~12.1 Gbps / ~1474 Kops**.
+
+**Ratio vs DCTCP (same 1×1 × 64 config):** **~3.96×** (paper: 4.8×). Acceptable
+given DCTCP sensitivity to switch ECN marking state.
 
 ### 14. eTran - TCP | 2KB throughput, 64 outstanding, single-threaded | 0.87x TAS | Medium
 
@@ -590,9 +598,15 @@ timeout 30 env ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=1 ETRAN_NR_NIC_QUEUES=1 \
 Output: same format as #13. Use `script -q -c` over SSH for line-buffered output.
 **⚠️ Env vars must be inside `script -q -c`** — same caveat as #13.
 
-**Result** (2026-07-06, fresh reboot, default 20 queues): **~11.79 Gbps**, ~719 Kops.
-No SIGABRT. Within expected run-to-run noise (~4%). Same connection-drop behavior
-after ~9s.
+**Result** (2026-07-08, fresh reboot, default 20 queues): **~12.29 Gbps**, ~750 Kops
+(1×1 × 64, server 1t/1q). Within expected run-to-run noise (~4%). No connection
+drops observed during 15s+ runs.
+
+**Ratio vs DCTCP (same 1×1 × 64 config):** **~6.76×** (based on DCTCP 1.82 Gbps
+measured concurrently). Note: DCTCP 2KB throughput varies significantly
+(1.8-4.6 Gbps) based on switch ECN marking state — the earlier 4.6 Gbps DCTCP
+baseline was through a different queue state. Ratio should be recalculated when
+DCTCP stabilizes at its known 4.6 Gbps level (resulting in ~2.65×).
 
 ### 15. eTran - TCP | 1K persistent connections, 64B requests | 2.26x Linux | 6-Node
 
