@@ -1,0 +1,205 @@
+---
+- name: Homa evaluation — gather interface facts
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Get ens1f1np1 IPv4 address
+      ansible.builtin.shell:
+        cmd: ip -4 addr show ens1f1np1 | grep -oP 'inet \K[\d.]+'
+      register: iface_ip
+      changed_when: false
+
+    - name: Get ens1f1np1 MAC address
+      ansible.builtin.shell:
+        cmd: cat /sys/class/net/ens1f1np1/address
+      register: iface_mac
+      changed_when: false
+
+    - name: Store interface facts
+      ansible.builtin.set_fact:
+        node_ip: "{{ iface_ip.stdout | trim }}"
+        node_mac: "{{ iface_mac.stdout | trim }}"
+        cacheable: false
+
+    - name: Show gathered facts
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: IP={{ node_ip }} MAC={{ node_mac }}"
+
+- name: Homa evaluation — install permanent ARP entries
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Add ARP entries for all other nodes
+      ansible.builtin.shell: |
+        {% for host in groups['all'] %}
+        {% if host != inventory_hostname %}
+        ip neigh replace {{ hostvars[host].node_ip }} lladdr {{ hostvars[host].node_mac }} dev ens1f1np1 nud permanent
+        {% endif %}
+        {% endfor %}
+      register: arp_added
+      changed_when: false
+
+    - name: Verify ARP table
+      ansible.builtin.shell:
+        cmd: ip neigh show dev ens1f1np1 nud permanent
+      register: arp_verify
+      changed_when: false
+
+    - name: ARP table dump
+      ansible.builtin.debug:
+        msg:
+          - "=== {{ inventory_hostname }} ARP table ==="
+          - "{{ arp_verify.stdout_lines }}"
+
+- name: Homa evaluation — install /etc/hosts entries
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Build /etc/hosts block for all nodes
+      ansible.builtin.blockinfile:
+        path: /etc/hosts
+        marker: "# {mark} ANSIBLE MANAGED — Homa cluster"
+        block: |
+          {% for host in groups['all'] %}
+          {{ hostvars[host].node_ip }} {{ host }}
+          {% endfor %}
+        state: present
+        create: false
+
+    - name: Verify hostname resolution
+      ansible.builtin.shell: |
+        {% for host in groups['all'] %}
+        getent hosts {{ host }} 2>/dev/null | head -1 || echo "{{ host }}: MISSING"
+        {% endfor %}
+      register: hosts_verify
+      changed_when: false
+
+    - name: /etc/hosts dump
+      ansible.builtin.debug:
+        msg:
+          - "=== {{ inventory_hostname }} /etc/hosts ==="
+          - "{{ hosts_verify.stdout_lines }}"
+
+- name: Homa evaluation — apply runtime NIC tuning
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Disable RX adaptive coalescing
+      ansible.builtin.command:
+        cmd: ethtool -C ens1f1np1 adaptive-rx off
+      changed_when: false
+      failed_when: false
+
+    - name: Set RX coalescing to zero
+      ansible.builtin.command:
+        cmd: ethtool -C ens1f1np1 rx-usecs 0
+      changed_when: false
+      failed_when: false
+
+    - name: Set RX frames coalescing to 1
+      ansible.builtin.command:
+        cmd: ethtool -C ens1f1np1 rx-frames 1
+      changed_when: false
+      failed_when: false
+
+    - name: Disable TX adaptive coalescing
+      ansible.builtin.command:
+        cmd: ethtool -C ens1f1np1 adaptive-tx off
+      changed_when: false
+      failed_when: false
+
+    - name: Set TX coalescing to 5 usec
+      ansible.builtin.command:
+        cmd: ethtool -C ens1f1np1 tx-usecs 5
+      changed_when: false
+      failed_when: false
+
+    - name: Disable flow control
+      ansible.builtin.command:
+        cmd: ethtool -A ens1f1np1 rx off tx off
+      changed_when: false
+      failed_when: false
+
+
+- name: Homa evaluation — enable segmentation offload
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    max_gso_size: 100000
+    hijack_tcp: 0
+  tasks:
+    - name: Set Homa max_gso_size
+      ansible.builtin.command:
+        cmd: sysctl .net.homa.max_gso_size={{ max_gso_size }}
+      changed_when: false
+      failed_when: false
+
+    - name: Set Homa hijack_tcp (TCP hijacking for TSO on non-Mellanox NICs)
+      ansible.builtin.command:
+        cmd: sysctl .net.homa.hijack_tcp={{ hijack_tcp }}
+      changed_when: false
+      failed_when: false
+
+- name: Homa evaluation — set CPU governor to performance
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Set scaling_governor to performance on all CPUs
+      ansible.builtin.shell: echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+      changed_when: false
+
+- name: Homa evaluation — set Homa qdisc
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Remove existing root qdisc on ens1f1np1
+      ansible.builtin.command:
+        cmd: tc qdisc del dev ens1f1np1 root
+      changed_when: false
+      failed_when: false
+
+    - name: Add homa qdisc on ens1f1np1
+      ansible.builtin.command:
+        cmd: "tc qdisc add dev ens1f1np1 root handle 1: homa"
+      changed_when: true
+
+    - name: Verify homa qdisc
+      ansible.builtin.command:
+        cmd: tc qdisc show dev ens1f1np1
+      register: homa_qdisc_verify
+      changed_when: false
+
+    - name: Homa qdisc dump
+      ansible.builtin.debug:
+        msg:
+          - "=== {{ inventory_hostname }} qdisc ==="
+          - "{{ homa_qdisc_verify.stdout_lines }}"
+
+- name: Homa evaluation — ping all other nodes by hostname
+  hosts: all
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Ping every other node
+      ansible.builtin.shell: |
+        {% for host in groups['all'] %}
+        {% if host != inventory_hostname %}
+        ping -c 1 -W 2 {{ host }} > /dev/null 2>&1 && echo "{{ host }}: OK" || echo "{{ host }}: FAIL"
+        {% endif %}
+        {% endfor %}
+      register: ping_results
+      changed_when: false
+      failed_when: false
+
+    - name: Ping results
+      ansible.builtin.debug:
+        msg:
+          - "=== {{ inventory_hostname }} ping ==="
+          - "{{ ping_results.stdout_lines }}"

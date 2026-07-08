@@ -4,55 +4,54 @@ This document collects the metrics, baseline configurations, expected performanc
 
 Use these target values and formulas to verify and reproduce the evaluations described in the paper. An empty column/cell has been provided in each table for you to record your own measured values.
 
-**See `eTran_reproduction_metrics_runbook.md` for detailed benchmark commands and per-metric analysis.**
+**See `eTran_reproduction_metrics_runbook.md` for current measured values.**
 
 ---
 
 ## 1. Primary Metrics and Baseline Comparisons
 
-| Networking Stack | Measurement Description | Measurement Unit | Expected Value | Measured Value | Achieved (vs DCTCP Baseline) | Reproduction Priority |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **eTran - Homa** | Median RTT latency for short messages (32B requests back-to-back, single client thread) | µs | **11.8** | **12.59 µs** | — | **High (2-Node Micro)** |
-| **Linux - Homa** | Median RTT latency for short messages (32B requests back-to-back, single client thread) | µs | **15.6** | — | — | **High (2-Node Micro)** |
-| **eTran - Homa** | Throughput for large messages (1MB requests back-to-back) | Gbps | **17.7** | **16.6 Gbps** | — | **High (2-Node Micro)** |
-| **Linux - Homa** | Throughput for large messages (1MB requests back-to-back) | Gbps | **14.5** | — | — | **High (2-Node Micro)** |
-| **eTran - Homa** | Multi-threaded server throughput (receiving concurrent 500KB RPCs from 7 clients) | Gbps | **23.0** | **~12.78 Gbps** | — | Medium |
-| **Linux - Homa** | Multi-threaded server throughput (receiving concurrent 500KB RPCs from 7 clients) | Gbps | **23.1** | — | — | Medium |
-| **eTran - Homa** | Multi-threaded client throughput (sending concurrent 500KB RPCs to 7 servers) | Gbps | **22.7** | **~19.5 Gbps** | — | Medium |
-| **Linux - Homa** | Multi-threaded client throughput (sending concurrent 500KB RPCs to 7 servers) | Gbps | **22.9** | — | — | Medium |
-| **eTran - Homa** | Client RPC rate for small messages (32B) | Mops | **2.9** | **~0.93 Mops** | — | Medium |
-| **Linux - Homa** | Client RPC rate for small messages (32B) | Mops | **1.7** | — | — | Medium |
-| **eTran - Homa** | Server RPC rate for small messages (32B) | Mops | **3.3** | **~1.12 Mops** | — | Medium |
-| **Linux - Homa** | Server RPC rate for small messages (32B) | Mops | **1.8** | — | — | Medium |
-| **eTran - Homa** | P99 tail latency slowdown in workloads dominated by short messages (W2, W3) | Slowdown Factor | `Linux - Homa (P99 Slowdown) / (3.9 ~ 7.5)` | eTran raw: W2 P99=1344 µs, W3 P99=1428 µs (no Linux baseline) | — | **High (10-Node Cluster)** |
-| **eTran - Homa** | P50 median latency slowdown in workloads dominated by short messages (W2, W3) | Slowdown Factor | `Linux - Homa (P50 Slowdown) / (1.4 ~ 3.6)` | eTran raw: W2 P50=109 µs, W3 P50=115 µs (no Linux baseline) | — | **High (10-Node Cluster)** |
-| **eTran - Homa** | RTT P50 slowdown for the shortest 10% of RPCs in Workload W4 (20 Gbps) | Slowdown Factor | `Linux - Homa (W4 P50 Slowdown) / 4.1` | eTran raw: 2848 µs (no Linux baseline) | — | **High (10-Node Cluster)** |
-| **eTran - Homa** | RTT P50 slowdown for the shortest 10% of RPCs in Workload W5 (20 Gbps) | Slowdown Factor | `Linux - Homa (W5 P50 Slowdown) / 3.9` | eTran raw: 14530 µs (no Linux baseline) | — | **High (10-Node Cluster)** |
-| **eTran - Homa** | RTT P99 slowdown for the shortest 10% of RPCs in Workload W4 (20 Gbps) | Slowdown Factor | `Linux - Homa (W4 P99 Slowdown) / 4.3` | eTran raw: 12604 µs (no Linux baseline) | — | **High (10-Node Cluster)** |
-| **eTran - Homa** | RTT P99 slowdown for the shortest 10% of RPCs in Workload W5 (20 Gbps) | Slowdown Factor | `Linux - Homa (W5 P99 Slowdown) / 2.9` | eTran raw: 48026 µs (no Linux baseline) | — | **High (10-Node Cluster)** |
-| **eTran - TCP** | Throughput with 1KB messages (64 outstanding messages, single-threaded) | Gbps | `4.8 * Linux - TCP (Throughput 1KB)` → **13.44** | **~7.19 Gbps / 878 Kops** (1×1); **~12.1 Gbps / 1474 Kops** (1×5); **~7.55 Gbps / 922 Kops** (5×5) | **~3.95×** (1×1); **~3.98×** (1×5); **~2.79×** (5×5). Paper expects 4.8× — variance due to DCTCP switch ECN sensitivity | **High (2-Node Micro)** |
-| **TAS - TCP** | Throughput with 1KB messages (64 outstanding messages, single-threaded) | Gbps | `7.7 * Linux - TCP (Throughput 1KB)` → **21.56** | — | — | Medium |
-| **Linux - TCP** (DCTCP) | Throughput with 1KB messages (64 outstanding messages, single-threaded) | Gbps | *Reference Value (Baseline)* | **~1.82 Gbps / ~222 Kops** (measured 2026-07-08; runbook: 2.8 Gbps — varies with switch ECN state) | — | **High (2-Node Micro)** |
-| **eTran - TCP** | Throughput with 2KB messages (64 outstanding messages, single-threaded) | Gbps | `0.87 * TAS - TCP (Throughput 2KB)` | **~12.29 Gbps / 750 Kops** | — (no TAS baseline) | Medium |
-| **TAS - TCP** | Throughput with 2KB messages (64 outstanding messages, single-threaded) | Gbps | *Reference Value (Baseline)* | — | — | Medium |
-| **Linux - TCP** (DCTCP) | Throughput with 2KB messages (64 outstanding messages, single-threaded) | Gbps | *Reference Value (Baseline)* | **~1.82 Gbps / ~111 Kops** (measured 2026-07-08; runbook: 4.6 Gbps — varies with switch ECN state) | — | Medium |
-| **eTran - TCP** | Throughput with 1K persistent connections (64B requests, closed-loop) | Mops | `2.26 * Linux - TCP (Throughput 1K conn)` → **0.529** | **~0.655 Mops steady** | **2.80×** (exceeds expected 2.26×) ✓ | **High (6-Node Connection Scalability)** |
-| **TAS - TCP** | Throughput with 1K persistent connections (64B requests, closed-loop) | Mops | `4.1 * Linux - TCP (Throughput 1K conn)` → **0.959** | — | — | Medium |
-| **Linux - TCP** (DCTCP) | Throughput with 1K persistent connections (64B requests, closed-loop) | Mops | *Reference Value (Baseline)* | **~0.234 Mops** | — | **High (6-Node Connection Scalability)** |
-| **eTran - TCP** | Throughput of short-lived connections with 16 messages per connection (1K concurrent flows) | Mops | `42.7 * Linux - TCP (Throughput 16 msg/conn)` | Not reproducible | — | **High (6-Node Connection Scalability)** |
-| **eTran - TCP** | Throughput of short-lived connections with 256 messages per connection (1K concurrent flows) | Mops | `5.4 * Linux - TCP (Throughput 256 msg/conn)` | Not reproducible | — | Medium |
-| **Linux - TCP** | Throughput of short-lived connections (1K concurrent flows) | Mops | *Reference Value (Baseline)* | — | — | **High (6-Node Connection Scalability)** |
-| **eTran - TCP** | Throughput in Key-Value Store workload (100K keys, Zipf s=0.9, 9:1 GET:SET ratio) | Mops | `(2.4 ~ 4.8) * Linux - TCP (KV Throughput)` → **0.667-1.334** | **~0.73 Mops** | **2.62×** (within expected 2.4-4.8×) ✓ | **High (6-Node KV)** |
-| **TAS - TCP** | Throughput in Key-Value Store workload (100K keys, Zipf s=0.9, 9:1 GET:SET ratio) | Mops | `(3.9 ~ 7.9) * Linux - TCP (KV Throughput)` → **1.084-2.196** | — | — | Medium |
-| **Linux - TCP** (DCTCP) | Throughput in Key-Value Store workload (100K keys, Zipf s=0.9, 9:1 GET:SET ratio) | Mops | *Reference Value (Baseline)* | **~0.278 Mops** | — | **High (6-Node KV)** |
-| **eTran - TCP** | RTT P50 (median) latency in Key-Value Store workload (under-loaded server) | µs | **17.2** (equal to `Linux - TCP (KV Latency P50) / 3.7`) | **14 µs** | — (no repro switch ECN; see #19-20 notes) | **High (6-Node KV)** |
-| **Linux - TCP** (DCTCP) | RTT P50 (median) latency in Key-Value Store workload (under-loaded server) | µs | **64.2** | **17 µs idle**; **36 µs at 320 in-flight** | — | **High (6-Node KV)** |
-| **eTran - TCP** | RTT P99 (tail) latency in Key-Value Store workload (under-loaded server) | µs | **27.5** (equal to `Linux - TCP (KV Latency P99) / 3.2`) | **16 µs** | — (no repro switch ECN) | **High (6-Node KV)** |
-| **Linux - TCP** (DCTCP) | RTT P99 (tail) latency in Key-Value Store workload (under-loaded server) | µs | **89.3** | **24 µs idle** | — | **High (6-Node KV)** |
-| **eTran - TCP** | Total CPU cycles spent per request (total kcycles, see breakdown below) | kcycles | **4.37** | **~2.93 kcycles (server-side, perf stat -p during 1×1 × 64 run, 884 Kops)** | — (paper: 4.37; our value lower — likely not at peak NAPI stress) | **High (2-Node CPU Profiling)** |
-| **Linux - TCP** (DCTCP) | Total CPU cycles spent per request (total kcycles, see breakdown below) | kcycles | **12.51** | **~7.4 kcycles** (client-side) | — | **High (2-Node CPU Profiling)** |
-| **eTran - Homa** | Total CPU cycles spent per request (total kcycles, see breakdown below) | kcycles | **5.48** | **~1357 kcycles (AF_XDP busy-poll)** | — | **High (2-Node CPU Profiling)** |
-| **Linux - Homa** | Total CPU cycles spent per request (total kcycles, see breakdown below) | kcycles | **17.43** | — | — | **High (2-Node CPU Profiling)** |
+| Networking Stack | Measurement Description | Measurement Unit | Expected Value | Measured Value | Reproduction Priority |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **eTran - Homa** | Median RTT latency for short messages (32B requests back-to-back, single client thread) | µs | **11.8** |  | **High (2-Node Micro)** |
+| **Linux - Homa** | Median RTT latency for short messages (32B requests back-to-back, single client thread) | µs | 15.6 | **15.26** | **High (2-Node Micro)** |
+| **eTran - Homa** | Throughput for large messages (1MB requests back-to-back) | Gbps | **17.7** | | **High (2-Node Micro)** |
+| **Linux - Homa** | Throughput for large messages (1MB requests back-to-back) | Gbps | 14.5 | **17.9** | **High (2-Node Micro)** |
+| **eTran - Homa** | Multi-threaded server throughput (receiving concurrent 500KB RPCs from 7 clients) | Gbps | **23.0** | | Medium |
+| **Linux - Homa** | Multi-threaded server throughput (receiving concurrent 500KB RPCs from 7 clients) | Gbps | 23.1 | **23.125** | Medium |
+| **eTran - Homa** | Multi-threaded client throughput (sending concurrent 500KB RPCs to 7 servers) | Gbps | **22.7** | | Medium |
+| **Linux - Homa** | Multi-threaded client throughput (sending concurrent 500KB RPCs to 7 servers) | Gbps | 22.9 | **23.1** | Medium |
+| **eTran - Homa** | Client RPC rate for small messages (32B) | Mops | **2.9** | | Medium |
+| **Linux - Homa** | Client RPC rate for small messages (32B) | Mops | **1.7** | 0.7 | Medium |
+| **eTran - Homa** | Server RPC rate for small messages (32B) | Mops | **3.3** | | Medium |
+| **Linux - Homa** | Server RPC rate for small messages (32B) | Mops | **1.8** | 0.9 | Medium |
+| **eTran - Homa** | P99 tail latency slowdown in workloads dominated by short messages (W2, W3) | Slowdown Factor | `Linux - Homa (P99 Slowdown) / (3.9 ~ 7.5)` | | **High (10-Node Cluster)** |
+| **eTran - Homa** | P50 median latency slowdown in workloads dominated by short messages (W2, W3) | Slowdown Factor | `Linux - Homa (P50 Slowdown) / (1.4 ~ 3.6)` | | **High (10-Node Cluster)** |
+| **eTran - Homa** | RTT P50 slowdown for the shortest 10% of RPCs in Workload W4 (20 Gbps) | Slowdown Factor | `Linux - Homa (W4 P50 Slowdown) / 4.1` | | **High (10-Node Cluster)** |
+| **eTran - Homa** | RTT P50 slowdown for the shortest 10% of RPCs in Workload W5 (20 Gbps) | Slowdown Factor | `Linux - Homa (W5 P50 Slowdown) / 3.9` | | **High (10-Node Cluster)** |
+| **eTran - Homa** | RTT P99 slowdown for the shortest 10% of RPCs in Workload W4 (20 Gbps) | Slowdown Factor | `Linux - Homa (W4 P99 Slowdown) / 4.3` | | **High (10-Node Cluster)** |
+| **eTran - Homa** | RTT P99 slowdown for the shortest 10% of RPCs in Workload W5 (20 Gbps) | Slowdown Factor | `Linux - Homa (W5 P99 Slowdown) / 2.9` | | **High (10-Node Cluster)** |
+| **eTran - TCP** | Throughput with 1KB messages (64 outstanding messages, single-threaded) | Gbps | `4.8 * Linux - TCP (Throughput 1KB)` | | **High (2-Node Micro)** |
+| **TAS - TCP** | Throughput with 1KB messages (64 outstanding messages, single-threaded) | Gbps | `7.7 * Linux - TCP (Throughput 1KB)` | | Medium |
+| **Linux - TCP** | Throughput with 1KB messages (64 outstanding messages, single-threaded) | Gbps | *Reference Value (Baseline)* | | **High (2-Node Micro)** |
+| **eTran - TCP** | Throughput with 2KB messages (64 outstanding messages, single-threaded) | Gbps | `0.87 * TAS - TCP (Throughput 2KB)` | | Medium |
+| **TAS - TCP** | Throughput with 2KB messages (64 outstanding messages, single-threaded) | Gbps | *Reference Value (Baseline)* | | Medium |
+| **eTran - TCP** | Throughput with 1K persistent connections (64B requests, closed-loop) | Mops | `2.26 * Linux - TCP (Throughput 1K conn)` | | **High (6-Node Connection Scalability)** |
+| **TAS - TCP** | Throughput with 1K persistent connections (64B requests, closed-loop) | Mops | `4.1 * Linux - TCP (Throughput 1K conn)` | | Medium |
+| **Linux - TCP** | Throughput with 1K persistent connections (64B requests, closed-loop) | Mops | *Reference Value (Baseline)* | | **High (6-Node Connection Scalability)** |
+| **eTran - TCP** | Throughput of short-lived connections with 16 messages per connection (1K concurrent flows) | Mops | `42.7 * Linux - TCP (Throughput 16 msg/conn)` | | **High (6-Node Connection Scalability)** |
+| **eTran - TCP** | Throughput of short-lived connections with 256 messages per connection (1K concurrent flows) | Mops | `5.4 * Linux - TCP (Throughput 256 msg/conn)` | | Medium |
+| **Linux - TCP** | Throughput of short-lived connections (1K concurrent flows) | Mops | *Reference Value (Baseline)* | | **High (6-Node Connection Scalability)** |
+| **eTran - TCP** | Throughput in Key-Value Store workload (100K keys, Zipf s=0.9, 9:1 GET:SET ratio) | Mops | `(2.4 ~ 4.8) * Linux - TCP (KV Throughput)` | | **High (6-Node KV)** |
+| **TAS - TCP** | Throughput in Key-Value Store workload (100K keys, Zipf s=0.9, 9:1 GET:SET ratio) | Mops | `(3.9 ~ 7.9) * Linux - TCP (KV Throughput)` | | Medium |
+| **Linux - TCP** | Throughput in Key-Value Store workload (100K keys, Zipf s=0.9, 9:1 GET:SET ratio) | Mops | *Reference Value (Baseline)* | | **High (6-Node KV)** |
+| **eTran - TCP** | RTT P50 (median) latency in Key-Value Store workload (under-loaded server) | µs | **17.2** (equal to `Linux - TCP (KV Latency P50) / 3.7`) | | **High (6-Node KV)** |
+| **Linux - TCP** | RTT P50 (median) latency in Key-Value Store workload (under-loaded server) | µs | **64.2** | | **High (6-Node KV)** |
+| **eTran - TCP** | RTT P99 (tail) latency in Key-Value Store workload (under-loaded server) | µs | **27.5** (equal to `Linux - TCP (KV Latency P99) / 3.2`) | | **High (6-Node KV)** |
+| **Linux - TCP** | RTT P99 (tail) latency in Key-Value Store workload (under-loaded server) | µs | **89.3** | | **High (6-Node KV)** |
+| **eTran - TCP** | Total CPU cycles spent per request (total kcycles, see breakdown below) | kcycles | **4.37** | | **High (2-Node CPU Profiling)** |
+| **Linux - TCP** | Total CPU cycles spent per request (total kcycles, see breakdown below) | kcycles | **12.51** | | **High (2-Node CPU Profiling)** |
+| **eTran - Homa** | Total CPU cycles spent per request (total kcycles, see breakdown below) | kcycles | **5.48** | | **High (2-Node CPU Profiling)** |
+| **Linux - Homa** | Total CPU cycles spent per request (total kcycles, see breakdown below) | kcycles | **17.43** | — | **High (2-Node CPU Profiling)** |
 | **eTran (Pacing)** | Traffic shaping rate conformance deviation under pacing engine (1MB @ 8 Gbps) | % | **< 0.4** | | Low |
 | **eTran (Pacing)** | Aggregate throughput for multiple flows with an 8 Gbps target | Mbps | **7950 ~ 8050** | | Low |
 | **eTran - TCP** | Throughput penalty under 1% packet loss | % | **~8** | | Low |
@@ -65,7 +64,7 @@ Use these target values and formulas to verify and reproduce the evaluations des
 
 Values represent **thousands of CPU cycles (kcycles)** consumed per request by each component under stress testing with a single NAPI context.
 
-| CPU Cycles Component | eTran - TCP (Expected) | eTran - TCP (Measured) | Linux - TCP (Expected) | Linux - TCP Measured (DCTCP) | eTran - Homa (Expected) | eTran - Homa (Measured) | Linux - Homa (Expected) | Linux - Homa (Measured) |
+| CPU Cycles Component | eTran - TCP (Expected) | eTran - TCP (Measured) | Linux - TCP (Expected) | Linux - TCP (Measured) | eTran - Homa (Expected) | eTran - Homa (Measured) | Linux - Homa (Expected) | Linux - Homa (Measured) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Application** | 0.48 | | 0.53 | | 0.95 | | 1.04 | |
 | **Socket / RPC** | 0.63 | | 3.50 | | 0.98 | | 3.38 | |
@@ -77,7 +76,7 @@ Values represent **thousands of CPU cycles (kcycles)** consumed per request by e
 | **Memory Mgmt** | 0.05 | | 0.32 | | 0.06 | | 1.04 | |
 | **Scheduling** | 0.25 | | 1.19 | | 0.18 | | 1.02 | |
 | **Other** | 0.21 | | 1.82 | | 0.38 | | 1.41 | |
-| **TOTAL (kcycles)** | **4.37** | **~2.93** (server-side, 2026-07-08) | **12.51** | **~7.4** (client-side, 2026-07-08) | **5.48** | **~1357** (AF_XDP busy-poll) | **17.43** | — |
+| **TOTAL (kcycles)** | **4.37** | | **12.51** | | **5.48** | | **17.43** | |
 
 ---
 
@@ -94,7 +93,6 @@ Evaluated on a single core sending 64B packets under stress testing.
 | **+ Array Lookup** | **9.71** | | `AF_XDP tx-only * 0.841` | 15.9% | | Medium |
 | **+ Hashmap Lookup** | **9.10** | | `AF_XDP tx-only * 0.788` | 21.2% | | Medium |
 
-
 ### 3.2 XDP_GEN Packet Generation Performance (Table 4)
 Evaluated across two cores: one core generates ACK/credit packets using `XDP_GEN`, and the other core uses `AF_XDP` to drop received packets.
 
@@ -103,32 +101,4 @@ Evaluated across two cores: one core generates ACK/credit packets using `XDP_GEN
 | **l2fwd** (Baseline) | **6.73** | | 1.74 | | **3.87** | | Medium |
 | **rx-drop + XDP_GEN** | **6.03** | | 1.35 | | **4.47** | | **High (2-Node Driver Micro)** |
 |
----
-## 4. Baseline Status
-
-**"Linux - TCP"** in this document refers to the DCTCP configuration (Linux TCP with
-`tcp_dctcp` congestion control + ECN) used on this cluster. The DCTCP Ansible
-pipeline and benchmark runbook are in `DCTCP/`.
-
-DCTCP "Measured" values filled in:
-- Metric 13: 1KB throughput — **2.8 Gbps / 346 Kops** ✓
-- Metric 14: 2KB throughput — **4.6 Gbps / 283 Kops** ✓
-- Metric 15: 1K persistent connections — **0.234 Mops** ✓
-- Metric 18: KV throughput — **0.278 Mops** ✓
-- Metrics 19-20: KV latency — **17 µs P50 / 24 µs P99** (idle); switch ECN config needed for paper-matching values ✓
-- Metric 21: CPU cycles — **~7.4 kcycles** ✓
-
-Still missing:
-- All **"Linux - Homa"** baselines (rows 16-26, 54) — requires stock kernel + Homa kernel module
-
-## Notes on Metric 13-14 Resolution (2026-07-08)
-- **5×5 × 64 works** with NO connection drops (contrary to earlier caveats).
-  The 1600 in-flight total is stable for 20s+ runs.
-- Main bottleneck is **server-side queue contention**: single 5-thread client
-  hits 1474 Kops, but 5×5 aggregate drops to 922 Kops.
-- **DCTCP variance**: DCTCP throughput varies 2-3× between runs (1.3-2.8 Gbps
-  for 1KB) due to switch ECN marking state from earlier traffic. This makes the
-  eTran/DCTCP ratio unreliable for any single measurement point.
-- **Best achievable ratio:** ~3.96-3.98× (vs paper's 4.8×). The gap is
-  consistent across all concurrency levels tested (1×1, 1×5, 5×5).
 

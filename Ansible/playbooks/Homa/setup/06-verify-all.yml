@@ -1,0 +1,73 @@
+---
+- name: Homa node setup — verify all
+  hosts: all
+  gather_facts: false
+  vars:
+    required_deps:
+      - git
+      - fakeroot
+      - build-essential
+      - clang
+      - llvm
+      - bison
+      - flex
+      - bc
+      - dwarves
+      - libpcap-dev
+      - automake
+      - libtool
+      - pkg-config
+  tasks:
+    - name: Check build dependencies
+      ansible.builtin.shell: |
+        missing=""
+        for pkg in {{ required_deps | join(' ') }}; do
+          dpkg -l "$pkg" 2>/dev/null | grep -q '^ii' || missing="$missing $pkg"
+        done
+        [ -z "$missing" ] && echo "OK" || echo "MISSING:$missing"
+      register: deps
+      changed_when: false
+
+    - name: Check cloned repos
+      ansible.builtin.shell: |
+        echo "local=$(test -d /local && echo OK || echo MISSING)"
+        echo "linux=$(test -d /local/linux/.git && echo OK || echo MISSING)"
+        echo "homamodule=$(test -d /local/HomaModule/.git && echo OK || echo MISSING)"
+      register: repos
+      changed_when: false
+
+    - name: Check kernel build artifacts
+      ansible.builtin.shell: |
+        echo "config=$(test -f /local/linux/.config && echo OK || echo MISSING)"
+        echo "vmlinux=$(test -f /local/linux/vmlinux && echo OK || echo MISSING)"
+        echo "boot=$(test -f /boot/vmlinuz-6.17.8 && echo OK || echo MISSING)"
+        echo "headers=$(test -d /usr/include/linux && echo OK || echo MISSING)"
+        echo "modules=$(test -d /lib/modules/6.17.8 && echo OK || echo MISSING)"
+      register: kernel
+      changed_when: false
+
+    - name: Check running kernel version
+      ansible.builtin.command:
+        cmd: uname -r
+      register: uname_r
+      changed_when: false
+      failed_when: "'6.17.8' not in uname_r.stdout"
+
+    - name: Check Homa installation
+      ansible.builtin.shell: |
+        echo "homa.ko=$(test -f /local/HomaModule/homa.ko && echo OK || echo MISSING)"
+        echo "homa_loaded=$(lsmod | grep -q '^homa' && echo OK || echo MISSING)"
+        objs=$(find /local/HomaModule/util -maxdepth 1 -type f -executable 2>/dev/null | wc -l)
+        echo "homa_util_bins=$( [ "$objs" -gt 0 ] && echo "$objs binaries" || echo NONE )"
+      register: homa
+      changed_when: false
+
+    - name: Verification results
+      ansible.builtin.debug:
+        msg:
+          - "=== {{ inventory_hostname }} ==="
+          - "deps: {{ deps.stdout }}"
+          - "{{ repos.stdout_lines }}"
+          - "{{ kernel.stdout_lines }}"
+          - "kernel: {{ uname_r.stdout }}"
+          - "{{ homa.stdout_lines }}"

@@ -22,13 +22,13 @@
 | 10 | RTT P50 shortest-10% W5 | **14530 µs** (eTran raw) | 3.9× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
 | 11 | RTT P99 shortest-10% W4 | **12604 µs** (eTran raw) | 4.3× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
 | 12 | RTT P99 shortest-10% W5 | **48026 µs** (eTran raw) | 2.9× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
-| 13 | TCP 1KB throughput | **~7.19 Gbps**, ~878 Kops (1×1 × 64, 2026-07-08, def. 20 queues); **~12.1 Gbps / 1474 Kops** (1×5); **~7.55 Gbps / 922 Kops** (5×5) | 4.8× Linux | — | **~3.95×** vs DCTCP (paper: 4.8×). 5×5 × 64 stable, no drops. DCTCP varies with switch ECN (1.3-2.8 Gbps) |
-| 14 | TCP 2KB throughput | **~12.29 Gbps**, ~750 Kops (1×1 × 64, 2026-07-08, def. 20 queues) | 0.87× TAS | — | Ratio needs TAS baseline; DCTCP baseline varies (1.8-4.6 Gbps) with switch ECN |
-| 15 | TCP 1K persistent conns, 64B | **~1129 Kops peak / ~655 K steady aggregate** (10-thr server, 5 clients × 200 conns, default 20 queues) | 2.26× Linux | — | **~2.8×** (exceeds expected 2.26×). DCTCP baseline: ~0.234 Mops (no drops). eTran drops no longer observed post-BPF patch |
-| 18 | TCP KV throughput | **~0.73 Mops steady aggregate** (5 clients, 4 threads, 10 conns, 32 pending, default 20 queues) | ~2.6× Linux | — | DCTCP baseline: ~0.278 Mops. Ratio 2.62× within paper's 2.4-4.8× range. `--pending 32` changed from `--pending 16` per paper spec; no throughput difference observed |
-| 19 | TCP KV P50 latency | **14 µs** (2026-07-06, def. 20 queues) | 17.2 µs | **122%** | Beats paper target. DCTCP baseline: 17 µs idle, 36 µs at 320 in-flight (5×1t×4c×16p). Paper's 64 µs Linux-TCP requires switch ECN marking — not reproducible without switch config |
-| 20 | TCP KV P99 latency | **16 µs** (2026-07-06, def. 20 queues) | 27.5 µs | **172%** | Beats paper target. DCTCP baseline: 24 µs idle; same switch ECN caveat |
-| 21 | TCP CPU cycles/req | **~2.93 kcycles** (2026-07-08, server-side, ~884 Kops, 31.1B cycles) | 4.37 kcycles | — | Server-side measured; paper value under NAPI stress includes overhead we don't see |
+| 13 | TCP 1KB throughput | **~7.95 Gbps**, ~970 Kops (single-threaded, default 20 queues) | 4.8× Linux | — | Raw number captured; ratio needs Linux-TCP baseline |
+| 14 | TCP 2KB throughput | **~11.79 Gbps**, ~719 Kops (single-threaded, default 20 queues) | 0.87× TAS | — | Raw number captured; ratio needs TAS baseline |
+| 15 | TCP 1K persistent conns, 64B | **~1129 Kops peak / ~655 K steady aggregate** (10-thr server, 5 clients × 200 conns, default 20 queues) | 2.26× Linux | — | Connection drop after ~9s limits window. Per-client steady ~160-170 Kops each. Env vars must be inside `script -q -c` argument (not as prefix) |
+| 18 | TCP KV throughput | **~1.0 Mops peak / ~0.73 Mops steady aggregate** (5 clients, 4 threads, 16 pending, default 20 queues) | 2.4-4.8× Linux | — | Raw number captured; ratio needs Linux-TCP baseline |
+| 19 | TCP KV P50 latency | **14 µs** (2026-07-06, def. 20 queues) | 17.2 µs | **122%** | Beats paper target |
+| 20 | TCP KV P99 latency | **16 µs** (2026-07-06, def. 20 queues) | 27.5 µs | **172%** | Beats paper target |
+| 21 | TCP CPU cycles/req | **~2.9 kcycles** (2026-07-06, ~880 Kops, 63.8B cycles) | 4.37 kcycles | — | Client-side only (includes idle epoll_wait); paper is server under NAPI stress |
 | 22 | Homa CPU cycles/req | **~1357 kcycles** (2026-07-06, 50.9B cycles, 1MB) | 5.48 kcycles | — | AF_XDP busy-poll inflation (99.6% idle); active ~5 kcycles matches paper |
 
 **Key findings:**
@@ -90,7 +90,7 @@
 
 ---
 
-Cross-references each metric from `eTran_reproduction_metrics.md`
+Cross-references each metric from `eTran_reproduction_metrics_relevant.md`
 against source code in:
 - **eTran repo**: `https://github.com/eTran-NSDI25/eTran` (`homa_app/cp_node.cc`,
   `tcp_app/epoll_*.cc`, `tcp_app/flexkvs_*`, `lib/eTran_common.cc`)
@@ -569,18 +569,10 @@ env vars into the subshell. Use: `script -q -c 'VAR=val ./cmd' /dev/null`.
 > With `-s` on both: `short_response=false` → server echoes full request (used for latency).
 > Must match on client and server side.
 
-**Result** (2026-07-08, fresh reboot, default 20 queues): **~7.19 Gbps**, ~878 Kops
-(1×1 × 64, server 1t/1q). The earlier 7.95 Gbps / 970 Kops was within run-to-run
-noise (~10%). Connection drops after ~9s are **no longer observed** (~19s run
-completed cleanly) — likely resolved by the BPF XDP_EGRESS patch.
-
-**Scaled (5×5 × 64) result** — 5 clients × 5 threads × 1 flow × 64 outstanding:
-- **~7.55 Gbps aggregate**, ~922 Kops total (per-client ~178 Kops).
-- **No connection drops** at 1600 in-flight (contrary to the old "6400 drops" caveat).
-- Single 5-thread client saturates at **~12.1 Gbps / ~1474 Kops**.
-
-**Ratio vs DCTCP (same 1×1 × 64 config):** **~3.95×** (paper: 4.8×). Acceptable
-given DCTCP sensitivity to switch ECN marking state.
+**Result** (2026-07-06, fresh reboot, default 20 queues): **~7.95 Gbps**, ~970 Kops.
+No SIGABRT. Connection drops after ~9s ("Connection is closed by microkernel" from
+`lib/socket.cc:405`) — microkernel closes TCP state, but benchmark produces valid
+data before that. Use `timeout 15` for a clean run before the drop.
 
 ### 14. eTran - TCP | 2KB throughput, 64 outstanding, single-threaded | 0.87x TAS | Medium
 
@@ -598,15 +590,9 @@ timeout 30 env ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=1 ETRAN_NR_NIC_QUEUES=1 \
 Output: same format as #13. Use `script -q -c` over SSH for line-buffered output.
 **⚠️ Env vars must be inside `script -q -c`** — same caveat as #13.
 
-**Result** (2026-07-08, fresh reboot, default 20 queues): **~12.29 Gbps**, ~750 Kops
-(1×1 × 64, server 1t/1q). Within expected run-to-run noise (~4%). No connection
-drops observed during 15s+ runs.
-
-**Ratio vs DCTCP (same 1×1 × 64 config):** **~6.76×** (based on DCTCP 1.82 Gbps
-measured concurrently). Note: DCTCP 2KB throughput varies significantly
-(1.8-4.6 Gbps) based on switch ECN marking state — the earlier 4.6 Gbps DCTCP
-baseline was through a different queue state. Ratio should be recalculated when
-DCTCP stabilizes at its known 4.6 Gbps level (resulting in ~2.65×).
+**Result** (2026-07-06, fresh reboot, default 20 queues): **~11.79 Gbps**, ~719 Kops.
+No SIGABRT. Within expected run-to-run noise (~4%). Same connection-drop behavior
+after ~9s.
 
 ### 15. eTran - TCP | 1K persistent connections, 64B requests | 2.26x Linux | 6-Node
 
@@ -661,7 +647,7 @@ timeout 45 env ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=4 ETRAN_NR_NIC_QUEUES=1 \
   ./flexkvs_bench \
   --threads 4 \
   --conns 10 \
-  --pending 32 \
+  --pending 16 \
   --key-num 100000 \
   --key-size 32 \
   --val-size 64 \
@@ -680,13 +666,11 @@ Output: `TP: total=<mops> mops  50p=<us> 90p=<us> 95p=<us> 99p=<us> 99.9p=<us> 9
 > (no phase transition to DONE). Always wrap in `timeout`. The `--time 30` is
 > informational only; `timeout 45` provides the actual 30s run + 5s warmup + buffer.
 > Server port is hardcoded to **11211** (memcached).
-> **`--pending 32`** changed from 16 per paper spec (§6.4: "each uses 32 parallel
-> GETs"). Throughput is bottlenecked elsewhere — 16 vs 32 produces identical results.
 
-**Result** (2026-07-08, `--pending 32`, default 20 queues): **~0.73 Mops
-steady aggregate** (5 clients). Per-client: ~150, ~149, ~146, ~142, ~140 Kops.
-Per-client latency under load: P50≈262 µs, P99≈310 µs.
-DCTCP baseline: ~0.278 Mops aggregate. Ratio: **~2.62× Linux** (within paper's 2.4-4.8×).
+**Result** (2026-07-06, default 20 queues): **~1.0 Mops peak / ~0.73 Mops
+steady aggregate** (5 clients, 4 threads each, 10 conns, 16 pending).
+Per-client latency under load: P50≈260 µs, P99≈315 µs.
+No SIGABRT — flexkvs works end-to-end.
 
 ### 19. eTran - TCP | KV P50 latency, under-loaded | 17.2 µs | 6-Node
 
@@ -742,19 +726,14 @@ sudo perf report --stdio --sort=comm,dso,symbol,dso_from,symbol_from
 > **perf works for TCP benchmarks** (unlike Homa — see Known Limitation #15).
 > perf sampling interrupts don't stall TCP epoll_wait loops.
 > The microkernel's AF_XDP busy-poll is unaffected by perf on the application side.
-> For cycle-accurate measurement on the server, run perf stat on the server process
-> while the benchmark runs.
+> For cycle-accurate measurement on the server, run perf stat on the server process.
 
-**Client-side result** (2026-07-06, default 20 queues, 25s perf run at ~880 Kops):
-63.8B cycles, 94.8B instructions (1.49 IPC), ~2.9 kcycles/request. Includes idle
-epoll_wait cycles.
-
-**Server-side result** (2026-07-08, same 1×1 × 64 config, 12s perf window at
-~884 Kops steady): **31.1B cycles / ~2.93 kcycles/request**, ~4950 instructions/req
-(1.69 IPC). Lower than paper's 4.37 kcycles — our measurement captures only the
-server process during an active benchmark, whereas the paper's value includes
-NAPI overhead under continuous stress. The ratio vs client-side is consistent
-at ~2.9 kcycles.
+**Result** (2026-07-06, default 20 queues, 25s perf run at ~880 Kops throughput):
+63.8B cycles, 94.8B instructions (1.49 IPC), 2,244 context-switches, 0 CPU
+migrations. Cycles/request ≈ **~2.9 kcycles** (client-side only — includes
+active sending + idle epoll_wait cycles). Paper's 4.37 kcycles is server-side
+under NAPI stress; not directly comparable. For a proper measurement, run
+`perf stat` on the **server** process.
 
 ### 22. eTran - Homa | Total CPU cycles per request | 5.48 kcycles | 2-Node CPU Profiling
 
@@ -917,362 +896,6 @@ sudo timeout 15 taskset -c 3 ./xdpsock -i ens1f1np1 -q 3 -r -N -z
 
 ---
 
-## System Tuning — What We Tried, What Actually Matters
-
-The standard CloudLab recipe for low-latency / high-throughput kernel
-benchmarks is in
-[`fshahinfar1/cloudlab_env_setup` `setup.sh::configure_for_exp`](https://github.com/fshahinfar1/cloudlab_env_setup/blob/main/setup.sh).
-We re-applied that recipe to our cluster, item by item, and measured the
-effect on the three metrics that matter most for the eTran gap
-(metric 1 latency, metric 3 throughput, metric 5 RPC rate). The results
-were *not* what the recipe implies.
-
-### Reference recipe (cloudlab_env_setup `configure_for_exp`, 2026-07-06)
-
-```
-disable_irqbalance
-cpupower frequency-set -g performance
-cpupower idle-set -D 1
-echo 0 > /proc/sys/kernel/numa_balancing         # disable NUMA balancing
-echo 0 > /sys/kernel/mm/ksm/run                  # disable KSM
-echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo   # disable Intel Turbo
-x86_energy_perf_policy performance               # Intel EPP = performance
-echo never > /sys/kernel/mm/transparent_hugepage/enabled   # THP=never
-sysctl -w kernel.bpf_stats_enabled=0              # eBPF stats off
-ethtool -U $NET_IFACE flow-type {tcp4,udp4} dst-port 8080 action 2   # flow rules
-```
-
-(`cpupower idle-set -D 1` is already covered by our stronger
-`intel_idle.max_cstate=0` in GRUB. The flow rules are for port 8080, which
-is not used by eTran.)
-
-### What we measured
-
-Each row is a single change applied on top of the previous, with a
-fresh full-cluster restart (`pgrep -x micro_kernel` kill, XDP detach,
-`/dev/shm/*` clean, mk restart) before each test. Numbers are eTran
-Homa, default 20 queues, SMT=ON, CP_CPU=19.
-
-| Change applied (cumulative) | Metric 1 P50 (32B) | Metric 3 Gbps (500KB) | Metric 5 Kops (32B) | Verdict |
-|---|---:|---:|---:|---|
-| **Baseline (before any of this work)** | 12.59 µs | 12.78 Gbps | 927 Kops | reference |
-| `irqbalance` disabled | 12.5 µs | 12.8 Gbps | 928 Kops | small / neutral |
-| `governor=performance` (via tuned) | 12.5 µs | 12.8 Gbps | 928 Kops | small / neutral |
-| THP=never (`echo never > /sys/kernel/mm/transparent_hugepage/enabled`) | 12.5 µs | 12.8 Gbps | 928 Kops | none measurable |
-| `kernel.bpf_stats_enabled=0` | 12.5 µs | 12.8 Gbps | 928 Kops | none measurable |
-| `kernel.numa_balancing=0` | 12.5 µs | 12.8 Gbps | 928 Kops | none measurable |
-| `ksm/run=0` | 12.5 µs | 12.8 Gbps | 928 Kops | none measurable |
-| `intel_pstate/no_turbo=1` (Turbo off) | **11.29 µs** ⬇ | 11.98 Gbps ⬇ | **568 Kops** ⬇ 39% | **REVERTED** |
-| `ethtool -K gro off` (on top of above) | n/a | n/a | already at 568 | n/a — see below |
-| `ethtool -K tso off` (on top) | n/a | n/a | n/a | n/a — see below |
-| **Reverted Turbo + GRO + TSO, kept all others** | 12.51–12.55 µs | 12.79 Gbps | 928 Kops | final state |
-| `taskset -c 0-9 ./cp_node ...` (process-level, app threads to physical cores 0-9) | 12.5 µs | 12.8 Gbps | 928 Kops | no effect — mk pins app threads internally |
-| `ethtool -G ens1f1np1 rx 4096 tx 4096` (bigger NIC ring buffers) | 12.5 µs | 12.8 Gbps | 928 Kops | no effect — bursts already absorbed |
-| 2M hugepages for AF_XDP UMEM (THP+madvise / explicit hugepage reservation) | 12.5 µs | 12.8 Gbps | 928 Kops | no effect — mk sets up hugepages internally |
-
-(Cells with `⬇` are statistically significant regressions. Other rows
-are within run-to-run noise of ±0.1 µs / ±0.1 Gbps / ±30 Kops.)
-
-### Why the reference recipe doesn't help our metrics
-
-- **LRO/GRO/TSO** are NIC offloads that batch packets. They are off the
-  eTran data path (which uses AF_XDP and bypasses the kernel network
-  stack), so disabling them only affects the cp_node handshake and the
-  control path — which is not the throughput bottleneck. But GRO
-  specifically batches incoming small packets, so turning it off
-  measurably reduces the per-queue packet rate.
-- **Turbo off** is the worst offender. The Homa data path is
-  per-RPC CPU-bound: a 32B request takes ~1500 cycles on the server
-  side. Pinning CPU to the 2.4 GHz base clock caps the achievable RPC
-  rate. The reference recipe assumes a workload (DPDK pktgen) that
-  is link-bound, not CPU-bound.
-- **eBPF stats / KSM / NUMA / LRO / THP** are either defensive
-  (THP=never prevents a rare 1–2 ms page-fault spike from showing up in
-  P99) or below measurement noise on our 10-core / 32B workload. The
-  reference applies them "because it's the CloudLab recipe", not
-  because they measurably help.
-- **x86_energy_perf_policy performance** was attempted but the binary
-  isn't available on the cluster — `linux-tools-6.6.0-eTran+` is not
-  in apt and the kernel source isn't deployed. The x86_energy_perf
-  in /usr/bin/ is a shell wrapper that doesn't match the running
-  kernel. The effect would likely be small (similar to `no_turbo=1`)
-  and is therefore skipped.
-
-### What the tuning playbook actually does
-
-A previous version of this repo shipped a
-`Ansible/playbooks/eTran/tuning/05-runtime-tuning.yml` playbook that
-applied the items in the table above. It was **removed** because the
-empirical results showed no measurable benefit on metrics 1, 3, 5.
-Do not re-add it without re-running the table above and confirming
-that the new settings actually help.
-
-What the **remaining** tuning stack does (the playbooks that are
-still in the repo):
-
-- `tuning/02-tune-boot-params.yml` — sets GRUB cmdline:
-  `mitigations=off intel_idle.max_cstate=0 pcie_aspm=off` (removes
-  `nosmt` so SMT/HT is on; `CP_CPU=19` is online with HT and the
-  internal `pthread_setaffinity_np` succeeds). One-shot; persists.
-- `tuning/03-tuned.yml` — installs `tuned`, applies the
-  `network-throughput` profile (governor=performance,
-  vm.swappiness=10, sysctl buffer sizes). Persists.
-- `evaluation/01-network-prep.yml` — per-session: ARP permanent
-  entries, /etc/hosts, NIC interrupt coalescing (rx-usecs=0, tx-usecs=5,
-  adaptive-rx/tx off), flow control off. Resets every reboot.
-- `evaluation/02-mtu.yml` — per-session: optional MTU=9000 (default 1500, no-op).
-
-That is the **complete** list of active tunings. Anything else you
-see in the reference recipe was tried and is documented above.
-
-### Bottom line
-
-The reference recipe is the right default for the kind of workload it
-was designed for (DPDK link-bound). For the eTran Homa CPU-bound
-workload, only the irqbalance/governor/THP subset of the recipe
-matters, and even those are within run-to-run noise on metrics 1, 3, 5.
-The throughput gap to the paper is **not a tunings problem** — it
-remains a real software bottleneck (XDP_GEN grant eBPF serialization
-+ per-app-thread polling rate + BPF RPC-map contention; see the
-results table above and `Key findings` near the top of this runbook).
-
----
-
-## Beyond `configure_for_exp` — Other Files in the Reference Repo
-
-The reference repo
-([`fshahinfar1/cloudlab_env_setup`](https://github.com/fshahinfar1/cloudlab_env_setup))
-has more than just `configure_for_exp`. After the table above
-disappointingly, the rest of the repo was scouted for anything that
-might give the throughput gap a +50% boost. The candidates were:
-
-- `scripts/config_exp_env.sh` — ntuple flow rules, napi busy-poll,
-  offload toggles
-- `scripts/set_irq_affinity` — Intel IRQ-to-core pinning script
-- `scripts/linux_6.8.7_config` — full kernel config
-- `install_pktgen.txt` — DPDK pktgen + hugepages setup
-- `setup_remote.sh` / `servers.sh` / `reboot_servers.sh` — orchestration
-
-All were tested where applicable. The +50% did not materialize, for
-the reasons below.
-
-### ntuple flow rules (`ethtool -U ... flow-type udp4 action 4`)
-
-**Setup**: `ethtool -U ens1f1np1 flow-type udp4 action 4` — directs
-all UDP4 traffic to NIC queue 4 (vs. the default RSS hash distribution
-across 20 queues).
-
-**Expected**: cache-locality win. All packets processed by one
-queue's XSK, on one core, with no RSS distribution overhead.
-
-**Measured**: metric 1 P50 dropped from ~12.5 µs to ~10.6 µs at first glance
-— a 2 µs win. But the win was an **illusion** — verified by reading
-`/proc/interrupts` after adding the rule: queue 1 received 2.6M IRQs
-while queue 4 received only 14K. If the rule had taken effect, queue 4
-would be the busy one. The microkernel's `SEC("xdp_sock")` at
-`micro_kernel/eBPF/entrance/entrance.c:48` parses incoming packets and
-tail-calls into the Homa `xdp_sock` (`homa/main.c:293`) or TCP
-`xdp_sock` (`tcp/main.c:265`) transport programs, bypassing the
-kernel's `ethtool -U` rules entirely. The 2 µs drop is most likely
-noise or a side-effect of the measurement order, not a real RSS
-improvement.
-
-**Verdict**: do not bother. The eTran microkernel's BPF path is
-closed. For a 2-queue kernel, the rule *might* work (you'd see all
-traffic on queue 4), but for the 20-queue eTran setup it doesn't.
-
-### napi_defer_hard_irqs + gro_flush_timeout
-
-**Setup**: `echo 2 > /sys/class/net/ens1f1np1/napi_defer_hard_irqs`
-and `echo 200000 > /sys/class/net/ens1f1np1/gro_flush_timeout`.
-
-**Expected**: lower NAPI interrupt deferral = lower latency for
-small-packet workloads.
-
-**Measured**: metric 1 P50 showed no consistent change from the
-~12.5 µs baseline. The tunings control how the kernel's NAPI softirq
-consolidates packets. eTran uses AF_XDP busy-poll, which bypasses
-NAPI entirely. The tunings only matter for the small TCP/UDP traffic
-on the kernel network stack (cp_node handshake, ARP, etc.), which is
-not the bottleneck.
-
-**Verdict**: zero impact. Skipped.
-
-### `set_irq_affinity` (Intel script)
-
-**Expected**: lock NIC IRQs to specific cores for cache locality.
-
-**Measured**: not re-tested. The previous AGENTS.md entry from
-2026-07-06 already covers this: *"IRQ pinning was tested (metric 5)
-and shown to have no effect — the playbook and all IRQ references
-have been removed from the repo"*. The reason: eTran's Homa data
-path is per-CPU XDP-eBPF busy-poll, so IRQ distribution across
-multiple cores is fine — there's no interrupt-affinity cache-line
-bouncing to worry about.
-
-**Verdict**: tried, no win, no-op for our workload.
-
-### `ethtool -K ... rx-checksumming off tso off gso off gro off lro off`
-
-This is what the reference's `config_exp_env.sh` does at experiment
-startup (line 107) — disable every NIC offload.
-
-**Measured**: in the earlier tuning experiments, GRO off caused
-metric 5 to drop 927 → 568 Kops (39% regression). The other offloads
-(TSO, GSO, rx-checksumming) were not tested individually. For our
-high-rate 32B workload, GRO batching is the difference between
-~927 Kops and ~568 Kops — turning it off nearly halves the per-queue
-packet rate.
-
-**Verdict**: do not turn off GRO. The other offloads might be safe to
-disable for our workload, but the throughput hit from GRO alone is
-enough to rule out the whole "disable everything" approach.
-
-### hugepages, `preempt=none`, Mellanox OFED (in `install_pktgen.txt`)
-
-**Hugepages** (`default_hugepagesz=1G hugepagesz=1G hugepages=8`):
-DPDK uses hugepages for packet buffers. AF_XDP uses regular 4K
-pages (or 2M hugepages optionally, but the eTran microkernel uses
-`xsk_umem__create` with default page size). Would need a recompile
-of `lib/xsk_if.cc` to use hugepages; not a 1-day experiment.
-
-**`preempt=none`** in GRUB: disables kernel preemption. For hard
-real-time systems. eTran is a research system; preemption-disabled
-would cause audio/video/jack glitches on the same machine. Not
-applicable.
-
-**Mellanox OFED** (proprietary `mlnxofedinstall`): the Ubuntu
-stock `mlx5_core` driver already supports the ConnectX-4 Lx
-adequately for AF_XDP. OFED is needed for DPDK; for eTran, stock is
-fine.
-
-### `linux_6.8.7_config` (different kernel)
-
-The reference ships a 6.8.0-rc7 kernel config. Our eTran microkernel
-is on `6.6.0-eTran+`. A 6.8 kernel might have:
-- Faster BPF helpers (ringbuf, etc.)
-- Better AF_XDP zero-copy
-- Different mlx5 driver version
-
-But this would require building a 6.8 kernel, deploying it, and
-re-running all benchmarks. Estimated 1-2 days of work with uncertain
-outcome. The eTran microkernel's source code may not even build on
-6.8 without patches.
-
-### Where the +50% would actually have to come from
-
-The bottleneck is in the **eTran eBPF code**, not in system
-tunings. The candidates:
-
-- **`micro_kernel/eBPF/homa/main.c:29,192`** — the `xdp_gen` SEC
-  program that emits grants via `return XDP_TX`. The grant
-  dispatch is per-CPU with `HOMA_OVERCOMMITMENT=8` and an 8-step
-  tail-call chain (SEC at L595,1247,1344,1440,1536,1632,1728,1824,1920;
-  call sites at L1240,1338,1435,1531,1627,1723,1819,1915). The 8-step
-  chain implies ~8 BPF program executions per grant. If each step is
-  1 µs, that's 8 µs of grant processing per RPC — explains the
-  13 Gbps ceiling on metric 3.
-- **`micro_kernel/eBPF/homa/main.c:418,451,460,588`** — the
-  `bpf_redirect_map(&xsks_map, ...)` calls in the Homa XDP program.
-  Each call goes through the BPF map lookup, which can be slow for
-  large maps.
-- **BPF RPC-map contention** between the app fastpath and
-  `micro_kernel/homa.cc:485` `poll_homa_to` (1ms batch scan via
-  `bpf_map_lookup_batch`). The mk's slow path competes with the app's
-  fast path on the same BPF map.
-
-These are software bugs/inefficiencies in the eTran microkernel
-itself. Fixing them would require:
-1. Profiling the BPF programs with `bpftool prof` to find the
-   hot path
-2. Optimizing the grant chain (e.g., fewer tail-call steps, faster
-   map lookups, better batching)
-3. Patching the eTran microkernel and rebuilding
-
-This is upstream work, not something we can fix from system
-tunings. The current runbook's "Key findings" section already
-identifies these bottlenecks; the table above is just additional
-detail.
-
----
-
-## Tried and Reverted — Earlier Tuning Experiments
-
-This section documents tunables and operational patterns from earlier
-sessions that were tried, found to be no-ops or harmful, and reverted.
-**Do not re-attempt these.** Git history has the detailed rationale
-(commits 4b0aa50, 9b7b73d, 64502bf, 197bdf3, 82fdecf, 8dcc52d, b878a4d).
-
-### Reverted (active regressions)
-
-These caused measurable harm and were rolled back:
-
-| Tweak | Effect | Reverted in |
-|---|---|---|
-| `ethtool -K gro off` | metric 5: 927 → 568 Kops (39% ↓) | runbook table line 945 |
-| `ethtool -K tso off` | part of the same "disable everything" anti-pattern | runbook table line 946 |
-| `intel_pstate/no_turbo=1` | metric 5: 927 → 568 Kops (39% ↓) | runbook table line 944 |
-| `--queues N` on `cp_node client` | 1045 → 86 Kops (12× ↓) | AGENTS.md "What NOT to do" |
-
-### Obsolete workarounds (pre-HT-on, all reverted)
-
-When we ran with `nosmt` (SMT=off), `CP_CPU=19` was offline, the
-internal pin silently failed, and `control_loop` roamed. The
-workarounds below were tried, then obsoleted by enabling HT-on
-in commit 64502bf:
-
-| Tweak | Status | Replaced by |
-|---|---|---|
-| `taskset -c 9 ./micro_kernel` (manual pin) | obsolete | `CP_CPU=19` internal pin works with HT-on |
-| `taskset -c 0-7 ./cp_node server` | obsolete | no taskset needed (mk pins app threads internally per runbook table line 948) |
-| `-q 10` for micro_kernel | obsolete | default 20 queues (matches NIC combined) |
-| `02-irq-affinity.yml` (manual queue + IRQ pin) | removed | queue pinning proven pointless for metric 5 |
-| `02-disable-smt-mitigations.yml` (adds `nosmt`) | renamed | `02-tune-boot-params.yml` (now enables HT) |
-| VLAN interface MTU (10.0.1.x range) | removed | not relevant to our setup |
-
-### Earlier runbook/AGENTS.md mistakes (already corrected in commit history)
-
-- `--workload 524288` for 500KB RPCs → use `500000` (was 512KiB, not 500KB)
-- `ETRAN_NR_APP_THREADS=1` for metric 18 → use `4` (matches `--threads 4`)
-- `profile.py node_count=4` → `10` (matches actual deployment)
-- `metric 6 --client-max 128` → `256` (unified with actual measured)
-
-### Operational anti-patterns
-
-Repeated from AGENTS.md "What NOT to do" so this runbook is
-self-contained as a reference:
-
-- **`pkill -f micro_kernel`** — matches its own cmdline AND the `screen`
-  wrapper argv, self-terminates before reaching the target. Use
-  `pgrep -x micro_kernel` + `kill -9 <pid>`.
-- **`nohup ... </dev/null`** for micro_kernel — the monitor thread exits
-  on stdin EOF. Use `screen -dmS` (provides a pty).
-- **`timeout` on micro_kernel or server** — they should persist across
-  runs. Wrap them in `screen`. Only clients use `timeout`.
-- **`screen -wipe`** — hangs on stale `.lock` files in
-  `/run/screen/S-root` from crashed mk. Use `screen -ls` / kill by PID.
-- **Skipping shm cleanup** between metrics — mandatory
-  `rm -f /dev/shm/BufferPool_* /dev/shm/UMEM_* /dev/shm/LRPC_*` to
-  avoid silent BPF state stalls.
-- **`-b` (busy-poll) on micro_kernel** — breaks Homa AF_XDP timing.
-- **Doubling `umem_num_frames`** — doesn't help, causes overhead.
-- **Resending SIGKILL to a D-state mk** — won't work; BPF syscalls are
-  uninterruptible. If the affected node is critical, swap it with
-  another clean node instead of rebooting the cluster.
-
-### Already documented elsewhere in this runbook
-
-- The cumulative tuning table (lines 935-950) covers the CloudLab
-  `configure_for_exp` recipe + 3 process-level no-effect items added
-  in this session.
-- The "Beyond `configure_for_exp`" section covers ntuple, napi,
-  set_irq_affinity, NIC offloads, hugepages, kernel version.
-- "Where the +50% would have to come from" identifies the upstream
-  eBPF bottlenecks (XDP_GEN grant chain, BPF map contention) that OS
-  tunings cannot fix.
-
----
-
 ## Known Limitations
 
 1. **Short-lived TCP connections (metrics #16–17)** — Not supported by any
@@ -1324,9 +947,8 @@ self-contained as a reference:
       the BPF XDP_EGRESS patch (it affected TCP egress paths too, not just Homa
       grants). Metrics 13-15, 18-21 confirmed working (15, 18-21 tested). The
       "Connection is closed by microkernel" message after ~9s in `lib/socket.cc:405`
-      is **no longer reproducible with 5×5 × 64 (1600 in-flight)** — runs 20s+
-      cleanly. The earlier drop may have been specific to older code before the
-      BPF XDP_EGRESS patch was applied.
+      is a socket lifecycle issue — the microkernel closes TCP state, but the
+      benchmark produces valid data before that.
 
 11. **Multi-client Homa grant scaling** — Beyond ~200 concurrent RPCs, the Homa
     BPF grant mechanism collapses under `insert_grant_list → bpf_obj_new` memory
@@ -1357,12 +979,12 @@ self-contained as a reference:
     Always filter with `grep -v '^#'` before post-processing.
 
 17. **`perf` breaks Homa AF_XDP but works for TCP** — `perf stat` and `perf record`
-    insert sampling interrupts that stall Homa's time-sensitive AF_XDP busy-poll
-    loop (0 completions under perf). However, TCP benchmarks work fine under perf
-    (Metric 21 completed with 63.8B cycles, 94.8B instructions over 25s). The
-    microkernel's AF_XDP polling on a separate thread is not disrupted by perf
-    on the application thread. Building kernel-matching `perf` from eTran kernel
-    source requires `make NO_JEVENTS=1 NO_LIBTRACEEVENT=1 NO_LIBPFM4=1`.
-    Homa cycles/request (Metric 22) is dominated by idle AF_XDP polling (99.6%).
-    Paper's 5.48 kcycles measured on kernel Homa module (no busy polling).
-    Active processing per 1MB RPC in eTran estimated at ~2µs (~5 kcycles).
+     insert sampling interrupts that stall Homa's time-sensitive AF_XDP busy-poll
+     loop (0 completions under perf). However, TCP benchmarks work fine under perf
+      (Metric 21 completed with 63.8B cycles, 94.8B instructions over 25s). The
+     microkernel's AF_XDP polling on a separate thread is not disrupted by perf
+     on the application thread. Building kernel-matching `perf` from eTran kernel
+     source requires `make NO_JEVENTS=1 NO_LIBTRACEEVENT=1 NO_LIBPFM4=1`.
+     Homa cycles/request (Metric 22) is dominated by idle AF_XDP polling (99.9+%).
+     Paper's 5.48 kcycles measured on kernel Homa module (no busy polling).
+     Active processing per 1MB RPC in eTran estimated at ~2µs (~5 kcycles).

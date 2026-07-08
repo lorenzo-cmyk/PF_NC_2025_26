@@ -1,0 +1,65 @@
+---
+- name: eTran evaluation — verify network + NIC tuning
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    iface: ens1f1np1
+  tasks:
+    - name: Check IP forwarding
+      ansible.builtin.shell:
+        cmd: echo "ip_forward=$(cat /proc/sys/net/ipv4/ip_forward)"
+      register: ip_forward
+      changed_when: false
+
+    - name: Check NIC coalescing
+      ansible.builtin.shell: |
+        ethtool -c {{ iface }} | grep -iE 'adaptive|usecs|frames'
+      register: coalesce
+      changed_when: false
+
+    - name: Check flow control
+      ansible.builtin.shell: |
+        ethtool -a {{ iface }} | grep -iE 'rx:|tx:' | tr -d '\t'
+      register: flow_ctrl
+      changed_when: false
+
+    - name: Check ARP permanent entries
+      ansible.builtin.shell: |
+        count=$(ip neigh show dev {{ iface }} nud permanent | wc -l)
+        echo "arp_permanent=$count"
+      register: arp_check
+      changed_when: false
+
+    - name: Check /etc/hosts
+      ansible.builtin.shell: |
+        # Count how many cluster hosts are resolvable
+        for host in node0 node1 node2 node3 node4 node5 node6 node7 node8 node9; do
+          getent hosts "$host" >/dev/null 2>&1 && echo "$host: OK" || echo "$host: MISSING"
+        done
+      register: hosts_check
+      changed_when: false
+
+    - name: Ping reachability
+      ansible.builtin.shell: |
+        for host in node0 node1 node2 node3 node4 node5 node6 node7 node8 node9; do
+          if [ "$host" != "{{ inventory_hostname }}" ]; then
+            ping -c 1 -W 1 "$host" >/dev/null 2>&1 && echo "$host: OK" || echo "$host: FAIL"
+          fi
+        done
+      register: ping_check
+      changed_when: false
+      failed_when: false
+
+    - name: Verification results
+      ansible.builtin.debug:
+        msg:
+          - "=== {{ inventory_hostname }} NETWORK VERIFICATION ==="
+          - "{{ ip_forward.stdout }}"
+          - "{{ coalesce.stdout_lines }}"
+          - "{{ flow_ctrl.stdout_lines }}"
+          - "{{ arp_check.stdout }}"
+          - "--- /etc/hosts ---"
+          - "{{ hosts_check.stdout_lines }}"
+          - "--- ping ---"
+          - "{{ ping_check.stdout_lines }}"

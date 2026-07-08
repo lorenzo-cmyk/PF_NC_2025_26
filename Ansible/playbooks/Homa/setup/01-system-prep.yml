@@ -1,0 +1,68 @@
+---
+- name: Homa node setup — system preparation
+  hosts: all
+  become: true
+  vars:
+    dpkg_options: "force-confdef,force-confold"
+    deps:
+      - git
+      - fakeroot
+      - build-essential
+      - ncurses-dev
+      - xz-utils
+      - libssl-dev
+      - bc
+      - flex
+      - libelf-dev
+      - bison
+      - clang
+      - llvm
+      - libclang-dev
+      - libbpf-dev
+      - dwarves
+      - libmnl-dev
+      - libc6-dev-i386
+      - libcap-dev
+      - libgoogle-perftools-dev
+      - libdwarf-dev
+      - cpufrequtils
+      - libpcap-dev
+      - automake
+      - libtool
+      - pkg-config
+      - screen
+  tasks:
+    - name: Update apt package cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Full system upgrade (non-interactive)
+      ansible.builtin.apt:
+        upgrade: dist
+        dpkg_options: "{{ dpkg_options }}"
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+
+    - name: Autoremove orphaned packages
+      ansible.builtin.apt:
+        autoremove: true
+
+    - name: Clean apt package cache
+      ansible.builtin.apt:
+        autoclean: true
+
+    - name: Install build dependencies
+      ansible.builtin.apt:
+        name: "{{ deps }}"
+        state: present
+
+    - name: Get running kernel version
+      ansible.builtin.command: uname -r
+      register: running_kernel
+      changed_when: false
+
+    - name: Install matching kernel headers for the running kernel
+      ansible.builtin.apt:
+        name: "linux-headers-{{ running_kernel.stdout }}"
+        state: present

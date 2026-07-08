@@ -1,0 +1,17 @@
+---
+- name: eTran node setup — reboot to new kernel
+  hosts: all
+  become: true
+  tasks:
+    - name: Reboot all nodes
+      ansible.builtin.reboot:
+        reboot_timeout: 600
+
+    - name: Verify kernel version is 6.17.8
+      ansible.builtin.command: uname -r
+      register: kernel_version
+      failed_when: "'6.17.8' not in kernel_version.stdout"
+
+    - name: Report kernel version
+      ansible.builtin.debug:
+        msg: "Running kernel: {{ kernel_version.stdout }}"
