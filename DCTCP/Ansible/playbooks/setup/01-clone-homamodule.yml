@@ -1,0 +1,24 @@
+---
+- name: DCTCP node setup — clone HomaModule sources
+  hosts: all
+  tasks:
+    - name: Create /local owned by the ansible user
+      become: true
+      ansible.builtin.file:
+        path: /local
+        state: directory
+        owner: "{{ ansible_user }}"
+        mode: "0755"
+
+    - name: Check if HomaModule is already cloned
+      ansible.builtin.stat:
+        path: /local/HomaModule/.git
+      register: homamodule_repo
+
+    - name: Clone HomaModule
+      ansible.builtin.git:
+        repo: https://github.com/PlatformLab/HomaModule
+        dest: /local/HomaModule
+      become: true
+      become_user: "{{ ansible_user }}"
+      when: not homamodule_repo.stat.exists

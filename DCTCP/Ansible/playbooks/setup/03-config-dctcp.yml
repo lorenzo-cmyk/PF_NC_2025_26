@@ -1,0 +1,47 @@
+---
+- name: DCTCP node setup — configure DCTCP runtime parameters
+  hosts: all
+  become: true
+  tasks:
+    - name: Check if tcp_dctcp module is already loaded
+      ansible.builtin.shell:
+        cmd: lsmod | grep -q ^tcp_dctcp && echo loaded || echo absent
+      register: dctcp_mod
+      changed_when: false
+
+    - name: Load tcp_dctcp kernel module
+      ansible.builtin.shell:
+        cmd: modprobe tcp_dctcp
+      when: dctcp_mod.stdout == "absent"
+
+    - name: Add dctcp to tcp_allowed_congestion_control
+      ansible.builtin.sysctl:
+        name: net.ipv4.tcp_allowed_congestion_control
+        value: dctcp
+        sysctl_set: true
+        state: present
+        reload: true
+
+    - name: Set TCP congestion control algorithm to dctcp
+      ansible.builtin.sysctl:
+        name: net.ipv4.tcp_congestion_control
+        value: dctcp
+        sysctl_set: true
+        state: present
+        reload: true
+
+    - name: Enable TCP Explicit Congestion Notification
+      ansible.builtin.sysctl:
+        name: net.ipv4.tcp_ecn
+        value: '1'
+        sysctl_set: true
+        state: present
+        reload: true
+
+    - name: Enable TCP timestamps
+      ansible.builtin.sysctl:
+        name: net.ipv4.tcp_timestamps
+        value: '1'
+        sysctl_set: true
+        state: present
+        reload: true

@@ -340,3 +340,104 @@ wait
 - `lib/socket.cc:405` — TCP "Connection is closed by microkernel" idle-drop message (after ~9s)
 - `lib/eTran_common.cc:595` — `pre_main` constructor: reads `ETRAN_PROTO` (L600, required), `ETRAN_NR_APP_THREADS` (L598) + `ETRAN_NR_NIC_QUEUES` (L599, required for TCP only)
 - `shared_lib/interpose.cc` — builds `libetran.so`; LD_PRELOAD intercepts `socket`/`epoll_wait`/`read`/`write`
+
+---
+
+# DCTCP Benchmark Session Notes
+
+DCTCP benchmarks measure the standard Linux TCP stack with DCTCP congestion
+control + ECN. No eTran, no micro_kernel, no XDP/BPF — just plain TCP over
+the kernel stack using the `cp_node` utility from
+[PlatformLab/HomaModule](https://github.com/PlatformLab/HomaModule)`/util`.
+
+## DCTCP Ansible pipeline
+
+```bash
+# From repo root:
+.venv/bin/ansible-playbook DCTCP/Ansible/playbooks/setup/site.yml
+```
+
+This runs three playbooks on all nodes:
+1. `01-clone-homamodule.yml` — clone HomaModule to `/local/HomaModule` (idempotent: checks `.git`)
+2. `02-compile-utils.yml` — compile `cp_node`, `server`, etc. in `util/` (idempotent: sentinel `.HomaModule-utils-built`)
+3. `03-config-dctcp.yml` — `modprobe tcp_dctcp`, set `tcp_congestion_control=dctcp`, `tcp_ecn=1`, `tcp_timestamps=1`
+
+Network prep (ARP, `/etc/hosts`, NIC tuning) is handled by eTran's evaluation
+playbooks — DCTCP runs on the same cluster and reuses that setup.
+
+## Pre-flight checklist
+
+```bash
+# Verify DCTCP is active on all nodes
+for n in node0 node1 ...; do
+  ssh $n "sysctl net.ipv4.tcp_congestion_control net.ipv4.tcp_ecn"
+done
+# Expect: tcp_congestion_control = dctcp, tcp_ecn = 1
+
+# Verify cp_node binary exists
+for n in node0 node1 ...; do
+  ssh $n "ls -la /local/HomaModule/util/cp_node"
+done
+```
+
+## Benchmark procedure
+
+DCTCP benchmarks use `cp_node` with `--protocol tcp` (NOT `--protocol homa`).
+Server runs in `screen` (persists across runs); clients use `timeout` (ephemeral).
+
+```bash
+# Kill stale processes
+for n in node0 node1 ...; do
+  ssh $n "for p in \$(pgrep -x cp_node); do sudo kill -9 \$p 2>/dev/null; done"
+done
+
+# Start server on node0
+ssh node0 "sudo screen -dmS dctcp_server bash -c \
+  'cd /local/HomaModule/util && exec ./cp_node server --protocol tcp --ports 1'"
+sleep 2
+
+# Run client on node1
+ssh node1 "cd /local/HomaModule/util && timeout 15 ./cp_node client \
+  --protocol tcp --first-server 0 --workload 32 --client-max 1 --ports 1"
+
+# Collect server output
+ssh node0 "sudo screen -S dctcp_server -X hardcopy /tmp/srv.log; \
+  cat /tmp/srv.log"
+```
+
+## Key differences from eTran benchmarks
+
+| Aspect | eTran (Homa/TCP) | DCTCP (plain TCP) |
+|--------|-----------------|-------------------|
+| Binary | `cp_node` (eTran), `epoll_*` (TCP) | `cp_node` from HomaModule |
+| Congestion control | N/A (Homa), cubic (eTran TCP) | dctcp |
+| ECN | N/A | Required (`tcp_ecn=1`) |
+| Kernel module | eTran XDP/BPF programs | `tcp_dctcp` |
+| Micro_kernel | Required (AF_XDP control plane) | Not needed |
+| LD_PRELOAD | `libetran.so` for TCP | Not needed |
+| Server default port | 4000 (Homa), 5000 (TCP epoll) | 5000 (cp_node TCP default) |
+| Client flag | `--protocol` omitted (default homa) | `--protocol tcp` required |
+
+## Known caveats
+
+- **epoll_* binaries work without LD_PRELOAD** and provide the fairest head-to-head
+  comparison with eTran TCP metrics. The same `epoll_server`/`epoll_client` from
+  `/local/eTran/eTran/tcp_app/` run unmodified on the standard kernel TCP stack
+  — just omit `LD_PRELOAD=libetran.so`. Use `stdbuf -oL` or `script -q -c` over
+  SSH to force line-buffered output (C stdout buffering).
+- **cp_node is the bottleneck for single-stream throughput**: the HomaModule
+  `cp_node` caps at ~240 Kops/sec regardless of message size (single sender
+  thread, per-message processing). For raw TCP streaming throughput, use
+  `epoll_client` instead.
+- **KV benchmarks** (flexkvs metrics 18-20 from eTran runbook) are not
+  reproducible without `LD_PRELOAD=libetran.so`.
+- **DCTCP large-message throughput saturates the NIC**. The 21.5-23.5
+  Gbps range is a link limitation, not a protocol one. This gives DCTCP a
+  significant advantage over Homa for bulk transfers on this hardware.
+- **DCTCP small-message tail latency**: TCP incast causes multi-ms
+  tail latency for 7:1 32B RPC rate, while Homa's grant-based flow control keeps
+  tail latency tight (~1.4 ms P99 at similar loads).
+- **DCTCP streaming throughput vs eTran TCP**: DCTCP (plain kernel TCP) achieves
+  ~2.8 Gbps (1KB) and ~4.6 Gbps (2KB), versus eTran's AF_XDP-accelerated TCP at
+  7.95 Gbps and 11.79 Gbps — a 2.6-2.8× gap from kernel TCP stack overhead.
+- Runbook: `DCTCP/Benchmark_Runbook.md` for exact per-metric commands and results.

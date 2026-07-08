@@ -1,0 +1,5 @@
+---
+- name: DCTCP full node setup
+  import_playbook: 01-clone-homamodule.yml
+- import_playbook: 02-compile-utils.yml
+- import_playbook: 03-config-dctcp.yml
