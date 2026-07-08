@@ -1,18 +1,7 @@
 # Metrics Requiring Redo
 
-## Still pending
+All tooling bugs and DCTCP baselines resolved. Remaining gaps:
 
-### #21 — CPU cycles per request
-**Issue:** Measured client-side (~2.9 kcycles). Paper value is server-side under
-single-NAPI stress (4.37 kcycles).
-
-**Action needed:** Rerun `perf stat` on the **server** process during a 1KB
-throughput run.
-
----
-
-## Dependency chain
-
-```
-#21 → measure on server side (eTran only)
-```
+- **Linux-Homa baselines** (~8 rows) — requires stock kernel + Homa kernel module
+- **Metrics 16-17** (short-lived connections) — not reproducible without benchmark code
+- **Switch ECN marking** (70KB threshold) — not configurable in our cluster

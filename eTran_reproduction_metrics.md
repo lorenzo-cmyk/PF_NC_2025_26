@@ -49,7 +49,7 @@ Use these target values and formulas to verify and reproduce the evaluations des
 | **Linux - TCP** (DCTCP) | RTT P50 (median) latency in Key-Value Store workload (under-loaded server) | µs | **64.2** | **17 µs idle**; **36 µs at 320 in-flight** | — | **High (6-Node KV)** |
 | **eTran - TCP** | RTT P99 (tail) latency in Key-Value Store workload (under-loaded server) | µs | **27.5** (equal to `Linux - TCP (KV Latency P99) / 3.2`) | **16 µs** | — (no repro switch ECN) | **High (6-Node KV)** |
 | **Linux - TCP** (DCTCP) | RTT P99 (tail) latency in Key-Value Store workload (under-loaded server) | µs | **89.3** | **24 µs idle** | — | **High (6-Node KV)** |
-| **eTran - TCP** | Total CPU cycles spent per request (total kcycles, see breakdown below) | kcycles | **4.37** | **~2.9 kcycles (client-side)** | — (needs server-side redo) | **High (2-Node CPU Profiling)** |
+| **eTran - TCP** | Total CPU cycles spent per request (total kcycles, see breakdown below) | kcycles | **4.37** | **~2.93 kcycles (server-side, perf stat -p during 1×1 × 64 run, 884 Kops)** | — (paper: 4.37; our value lower — likely not at peak NAPI stress) | **High (2-Node CPU Profiling)** |
 | **Linux - TCP** (DCTCP) | Total CPU cycles spent per request (total kcycles, see breakdown below) | kcycles | **12.51** | **~7.4 kcycles** (client-side) | — | **High (2-Node CPU Profiling)** |
 | **eTran - Homa** | Total CPU cycles spent per request (total kcycles, see breakdown below) | kcycles | **5.48** | **~1357 kcycles (AF_XDP busy-poll)** | — | **High (2-Node CPU Profiling)** |
 | **Linux - Homa** | Total CPU cycles spent per request (total kcycles, see breakdown below) | kcycles | **17.43** | — | — | **High (2-Node CPU Profiling)** |
@@ -119,7 +119,6 @@ DCTCP "Measured" values filled in:
 - Metric 21: CPU cycles — **~7.4 kcycles** ✓
 
 Still missing:
-- Metric 21: server-side CPU cycle measurement for fair eTran comparison
 - All **"Linux - Homa"** baselines (rows 16-26, 54) — requires stock kernel + Homa kernel module
 
 ## Notes on Metric 13-14 Resolution (2026-07-08)

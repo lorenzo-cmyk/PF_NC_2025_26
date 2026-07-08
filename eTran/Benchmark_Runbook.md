@@ -28,7 +28,7 @@
 | 18 | TCP KV throughput | **~0.73 Mops steady aggregate** (5 clients, 4 threads, 10 conns, 32 pending, default 20 queues) | ~2.6× Linux | — | DCTCP baseline: ~0.278 Mops. Ratio 2.61× within paper's 2.4-4.8× range. `--pending 32` changed from `--pending 16` per paper spec; no throughput difference observed |
 | 19 | TCP KV P50 latency | **14 µs** (2026-07-06, def. 20 queues) | 17.2 µs | **122%** | Beats paper target. DCTCP baseline: 17 µs idle, 36 µs at 320 in-flight (5×1t×4c×16p). Paper's 64 µs Linux-TCP requires switch ECN marking — not reproducible without switch config |
 | 20 | TCP KV P99 latency | **16 µs** (2026-07-06, def. 20 queues) | 27.5 µs | **172%** | Beats paper target. DCTCP baseline: 24 µs idle; same switch ECN caveat |
-| 21 | TCP CPU cycles/req | **~2.9 kcycles** (2026-07-06, ~880 Kops, 63.8B cycles) | 4.37 kcycles | — | Client-side only (includes idle epoll_wait); paper is server under NAPI stress |
+| 21 | TCP CPU cycles/req | **~2.93 kcycles** (2026-07-08, server-side, ~884 Kops, 31.1B cycles) | 4.37 kcycles | — | Server-side measured; paper value under NAPI stress includes overhead we don't see |
 | 22 | Homa CPU cycles/req | **~1357 kcycles** (2026-07-06, 50.9B cycles, 1MB) | 5.48 kcycles | — | AF_XDP busy-poll inflation (99.6% idle); active ~5 kcycles matches paper |
 
 **Key findings:**
@@ -742,14 +742,19 @@ sudo perf report --stdio --sort=comm,dso,symbol,dso_from,symbol_from
 > **perf works for TCP benchmarks** (unlike Homa — see Known Limitation #15).
 > perf sampling interrupts don't stall TCP epoll_wait loops.
 > The microkernel's AF_XDP busy-poll is unaffected by perf on the application side.
-> For cycle-accurate measurement on the server, run perf stat on the server process.
+> For cycle-accurate measurement on the server, run perf stat on the server process
+> while the benchmark runs.
 
-**Result** (2026-07-06, default 20 queues, 25s perf run at ~880 Kops throughput):
-63.8B cycles, 94.8B instructions (1.49 IPC), 2,244 context-switches, 0 CPU
-migrations. Cycles/request ≈ **~2.9 kcycles** (client-side only — includes
-active sending + idle epoll_wait cycles). Paper's 4.37 kcycles is server-side
-under NAPI stress; not directly comparable. For a proper measurement, run
-`perf stat` on the **server** process.
+**Client-side result** (2026-07-06, default 20 queues, 25s perf run at ~880 Kops):
+63.8B cycles, 94.8B instructions (1.49 IPC), ~2.9 kcycles/request. Includes idle
+epoll_wait cycles.
+
+**Server-side result** (2026-07-08, same 1×1 × 64 config, 12s perf window at
+~884 Kops steady): **31.1B cycles / ~2.93 kcycles/request**, ~4950 instructions/req
+(1.69 IPC). Lower than paper's 4.37 kcycles — our measurement captures only the
+server process during an active benchmark, whereas the paper's value includes
+NAPI overhead under continuous stress. The ratio vs client-side is consistent
+at ~2.9 kcycles.
 
 ### 22. eTran - Homa | Total CPU cycles per request | 5.48 kcycles | 2-Node CPU Profiling
 
