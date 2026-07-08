@@ -6,7 +6,7 @@
     - name: Enable net.ipv4.ip_forward
       ansible.builtin.sysctl:
         name: net.ipv4.ip_forward
-        value: '1'
+        value: "1"
         sysctl_set: true
         state: present
         reload: true

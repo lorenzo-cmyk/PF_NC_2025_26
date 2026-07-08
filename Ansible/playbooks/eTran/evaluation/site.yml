@@ -1,0 +1,5 @@
+---
+- name: eTran full evaluation prep
+  import_playbook: 01-network-prep.yml
+- import_playbook: 02-mtu.yml
+- import_playbook: 03-verify-network.yml

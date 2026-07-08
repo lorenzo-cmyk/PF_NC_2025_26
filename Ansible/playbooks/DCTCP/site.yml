@@ -1,0 +1,5 @@
+---
+- name: DCTCP bootstrap via eTran
+  import_playbook: ../eTran/site.yml
+- name: DCTCP full node setup
+  import_playbook: setup/site.yml

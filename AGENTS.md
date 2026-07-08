@@ -5,15 +5,15 @@
 Reboot resets: ARP table, /etc/hosts, NIC coalescing, flow control, queue count, MTU.
 
 ```bash
-# All ansible-playbook commands run from Ansible/ directory:
-cd Ansible
+# All ansible-playbook commands run from eTran/Ansible/ directory:
+cd eTran/Ansible
 
 # Required after every reboot:
-.venv/bin/ansible-playbook playbooks/eTran/evaluation/01-network-prep.yml
-.venv/bin/ansible-playbook playbooks/eTran/evaluation/04-verify-network.yml
+.venv/bin/ansible-playbook playbooks/evaluation/01-network-prep.yml
+.venv/bin/ansible-playbook playbooks/evaluation/03-verify-network.yml
 
 # Optional: MTU (default 1500, skip for standard runs)
-# .venv/bin/ansible-playbook playbooks/eTran/evaluation/03-mtu.yml --extra-vars 'mtu=9000'
+# .venv/bin/ansible-playbook playbooks/evaluation/02-mtu.yml --extra-vars 'mtu=9000'
 ```
 
 ## Critical procedure for running benchmarks
@@ -143,6 +143,10 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
   Linux-Homa baseline postponed. `--server-ports 4` (operational, matches the
   metric 3 invocation — not a hard cap; could try 5/7, see metric 3 notes).
 - Metrics 13-21: TCP benchmarks, use `script -q -c` over SSH for visible output
+- Metrics 13-14: 5×5 × 64 (1600 in-flight) is **stable with no drops** post-BPF XDP_EGRESS patch.
+  Optimal per-client config: 5 threads × 1 flow × 64 outstanding (`-t 5 -f 1 -o 64`).
+  Single client achieves ~12.1 Gbps / 1474 Kops; 5-client aggregate drops to ~922 Kops
+  (server-side queue contention). Best eTran/DCTCP ratio: ~3.95× (paper: 4.8×).
 - Metric 15: stagger clients 0.5s apart to avoid overwhelming server
 - Metrics 19-20: KV latency beats paper targets (14 vs 17.2 µs P50, 16 vs 27.5 µs P99)
 
@@ -174,8 +178,15 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
   is what `perf` sampling interrupts stall; mk's slow-path control_loop is
   unaffected and is not the relevant target of perf interference.
 - TCP connection drop after ~9s: "Connection is closed by microkernel" from
-  `lib/socket.cc:405`. The microkernel closes TCP state after idle. Benchmark
-  produces valid data before the drop. Use `timeout 15` for clean runs.
+  `lib/socket.cc:405`. **No longer reproducible with 5×5 × 64 (1600 in-flight)** —
+  runs 20s+ cleanly. The earlier drop may have been specific to older code before
+  the BPF XDP_EGRESS patch. Benchmark produces valid data even if drops occur.
+  Keep `timeout 15` for safety but the caveat is likely stale.
+- **DCTCP 1×1 × 64 throughput varies 2-3×** between runs (1.3-2.8 Gbps for 1KB,
+  1.8-4.6 Gbps for 2KB) due to switch ECN marking state from prior traffic.
+  This makes the eTran/DCTCP ratio unreliable for any single measurement point.
+  When reporting ratios, note the concurrent DCTCP baseline and compare against
+  the runbook's best-case DCTCP baseline for a fair comparison.
 - epoll_* and flexkvs output is hidden over SSH (C stdout buffering). Use
   `script -q -c 'command' /dev/null` to force line-buffered output.
   **Env vars must be inside the `-c` argument** — `env VAR=val script -q -c 'cmd'`
@@ -270,12 +281,28 @@ wait
   mk's `CP_CPU=19` (SMT sibling of core 9) is online and the internal
   `pthread_setaffinity_np` succeeds. This matches the paper's design (§6).
 - C-states=off (`intel_idle.max_cstate=0`), ASPM=off — required for sub-15µs latency metrics
+- CPU governor=`performance` (via tuned `network-throughput` profile).
+  irqbalance systemd-disabled, `cpupower idle-set -D 1` (covered by
+  `intel_idle.max_cstate=0` in GRUB).
+  Reference: cloudlab_env_setup `configure_for_exp`.
+- The full CloudLab `configure_for_exp` recipe was applied item-by-item and
+  measured against metrics 1/3/5. Most items (eBPF stats off, KSM off, NUMA
+  balancing off, LRO off) had **no measurable effect**. **Turbo off
+  (`no_turbo=1`) and GRO/TSO off are NOT applied** — they cause a 39%
+  regression on metric 5 (927 → 568 Kops) because Homa's per-RPC CPU
+  processing is the bottleneck, not the link. The earlier
+  `tuning/05-runtime-tuning.yml` playbook that applied these was
+  **removed** — see the runbook section
+  "System Tuning — What We Tried, What Actually Matters" for the full
+  table and rationale, and **do not waste time re-adding it**.
 
 ## Ansible playbook structure
-- `Ansible/playbooks/eTran/setup/` — one-time: system deps, kernel build, install eTran
-- `Ansible/playbooks/eTran/tuning/` — one-time (persists reboot): mitigations off, C-states off, ASPM off, tuned
-  (SMT is now ON — `nosmt` removed; playbook renamed `02-tune-boot-params.yml`)
-- `Ansible/playbooks/eTran/evaluation/` — per-session (run after EVERY reboot): ARP, hosts, NIC tuning, MTU, verify
+- `eTran/Ansible/playbooks/setup/` — one-time: system deps, kernel build, install eTran
+- `eTran/Ansible/playbooks/tuning/` — one-time (persists reboot): mitigations off, C-states off, ASPM off, tuned
+  (SMT is now ON — `nosmt` removed; playbook renamed `02-tune-boot-params.yml`).
+  Note: a `05-runtime-tuning.yml` was tried and removed; see the
+  "System Tuning" section in the runbook.
+- `eTran/Ansible/playbooks/evaluation/` — per-session (run after EVERY reboot): ARP, hosts, NIC tuning, MTU, verify
 
 ## Ansible inventory
 - `@server` = node0, `@clients` = node1–node9
@@ -324,3 +351,106 @@ wait
 - `lib/socket.cc:405` — TCP "Connection is closed by microkernel" idle-drop message (after ~9s)
 - `lib/eTran_common.cc:595` — `pre_main` constructor: reads `ETRAN_PROTO` (L600, required), `ETRAN_NR_APP_THREADS` (L598) + `ETRAN_NR_NIC_QUEUES` (L599, required for TCP only)
 - `shared_lib/interpose.cc` — builds `libetran.so`; LD_PRELOAD intercepts `socket`/`epoll_wait`/`read`/`write`
+
+---
+
+# DCTCP Benchmark Session Notes
+
+DCTCP benchmarks measure the standard Linux TCP stack with DCTCP congestion
+control + ECN. No eTran, no micro_kernel, no XDP/BPF — just plain TCP over
+the kernel stack using the `cp_node` utility from
+[PlatformLab/HomaModule](https://github.com/PlatformLab/HomaModule)`/util`.
+
+## DCTCP Ansible pipeline
+
+```bash
+# From repo root:
+.venv/bin/ansible-playbook DCTCP/Ansible/playbooks/setup/site.yml
+```
+
+This runs three playbooks on all nodes:
+1. `01-clone-homamodule.yml` — clone HomaModule to `/local/HomaModule` (idempotent: checks `.git`)
+2. `02-compile-utils.yml` — compile `cp_node`, `server`, etc. in `util/` (idempotent: sentinel `.HomaModule-utils-built`)
+3. `03-config-dctcp.yml` — `modprobe tcp_dctcp`, set `tcp_congestion_control=dctcp`, `tcp_ecn=1`, `tcp_timestamps=1`
+
+Network prep (ARP, `/etc/hosts`, NIC tuning) is handled by eTran's evaluation
+playbooks — DCTCP runs on the same cluster and reuses that setup.
+
+## Pre-flight checklist
+
+```bash
+# Verify DCTCP is active on all nodes
+for n in node0 node1 ...; do
+  ssh $n "sysctl net.ipv4.tcp_congestion_control net.ipv4.tcp_ecn"
+done
+# Expect: tcp_congestion_control = dctcp, tcp_ecn = 1
+
+# Verify cp_node binary exists
+for n in node0 node1 ...; do
+  ssh $n "ls -la /local/HomaModule/util/cp_node"
+done
+```
+
+## Benchmark procedure
+
+DCTCP benchmarks use `cp_node` with `--protocol tcp` (NOT `--protocol homa`).
+Server runs in `screen` (persists across runs); clients use `timeout` (ephemeral).
+
+```bash
+# Kill stale processes
+for n in node0 node1 ...; do
+  ssh $n "for p in \$(pgrep -x cp_node); do sudo kill -9 \$p 2>/dev/null; done"
+done
+
+# Start server on node0
+ssh node0 "sudo screen -dmS dctcp_server bash -c \
+  'cd /local/HomaModule/util && exec ./cp_node server --protocol tcp --ports 1'"
+sleep 2
+
+# Run client on node1
+ssh node1 "cd /local/HomaModule/util && timeout 15 ./cp_node client \
+  --protocol tcp --first-server 0 --workload 32 --client-max 1 --ports 1"
+
+# Collect server output
+ssh node0 "sudo screen -S dctcp_server -X hardcopy /tmp/srv.log; \
+  cat /tmp/srv.log"
+```
+
+## Key differences from eTran benchmarks
+
+| Aspect | eTran (Homa/TCP) | DCTCP (plain TCP) |
+|--------|-----------------|-------------------|
+| Binary | `cp_node` (eTran), `epoll_*` (TCP) | `cp_node` from HomaModule |
+| Congestion control | N/A (Homa), cubic (eTran TCP) | dctcp |
+| ECN | N/A | Required (`tcp_ecn=1`) |
+| Kernel module | eTran XDP/BPF programs | `tcp_dctcp` |
+| Micro_kernel | Required (AF_XDP control plane) | Not needed |
+| LD_PRELOAD | `libetran.so` for TCP | Not needed |
+| Server default port | 4000 (Homa), 5000 (TCP epoll) | 5000 (cp_node TCP default) |
+| Client flag | `--protocol` omitted (default homa) | `--protocol tcp` required |
+
+## Known caveats
+
+- **epoll_* binaries work without LD_PRELOAD** and provide the fairest head-to-head
+  comparison with eTran TCP metrics. The same `epoll_server`/`epoll_client` from
+  `/local/eTran/eTran/tcp_app/` run unmodified on the standard kernel TCP stack
+  — just omit `LD_PRELOAD=libetran.so`. Use `stdbuf -oL` or `script -q -c` over
+  SSH to force line-buffered output (C stdout buffering).
+- **cp_node is the bottleneck for single-stream throughput**: the HomaModule
+  `cp_node` caps at ~240 Kops/sec regardless of message size (single sender
+  thread, per-message processing). For raw TCP streaming throughput, use
+  `epoll_client` instead.
+- **KV benchmarks** (flexkvs metrics 18-20 from eTran runbook) are not
+  reproducible without `LD_PRELOAD=libetran.so`.
+- **DCTCP large-message throughput saturates the NIC**. The 21.5-23.5
+  Gbps range is a link limitation, not a protocol one. This gives DCTCP a
+  significant advantage over Homa for bulk transfers on this hardware.
+- **DCTCP small-message tail latency**: TCP incast causes multi-ms
+  tail latency for 7:1 32B RPC rate, while Homa's grant-based flow control keeps
+  tail latency tight (~1.4 ms P99 at similar loads).
+- **DCTCP streaming throughput vs eTran TCP**: DCTCP (plain kernel TCP) achieves
+  ~1.8-2.8 Gbps (1KB, varies with switch ECN) and ~1.8-4.6 Gbps (2KB), versus
+  eTran's AF_XDP-accelerated TCP at ~7.2 Gbps (1KB) and ~12.3 Gbps (2KB) —
+  a ~2.6-3.95× gap from kernel TCP stack overhead. DCTCP's exact value depends
+  on switch ECN marking state, making single-point ratios unreliable.
+- Runbook: `DCTCP/Benchmark_Runbook.md` for exact per-metric commands and results.

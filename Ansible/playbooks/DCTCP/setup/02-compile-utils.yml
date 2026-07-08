@@ -1,0 +1,16 @@
+---
+- name: DCTCP node setup — compile HomaModule benchmark utilities
+  hosts: all
+  tasks:
+    - name: Check if utils are already compiled
+      ansible.builtin.stat:
+        path: /local/HomaModule/util/.HomaModule-utils-built
+      register: utils_built
+
+    - name: Compile HomaModule benchmark utilities
+      ansible.builtin.shell:
+        cmd: make -j$(nproc) && touch /local/HomaModule/util/.HomaModule-utils-built
+        chdir: /local/HomaModule/util
+      become: true
+      become_user: "{{ ansible_user }}"
+      when: not utils_built.stat.exists
