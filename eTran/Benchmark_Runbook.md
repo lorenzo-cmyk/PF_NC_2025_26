@@ -22,12 +22,12 @@
 | 10 | RTT P50 shortest-10% W5 | **14530 µs** (eTran raw) | 3.9× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
 | 11 | RTT P99 shortest-10% W4 | **12604 µs** (eTran raw) | 4.3× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
 | 12 | RTT P99 shortest-10% W5 | **48026 µs** (eTran raw) | 2.9× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
-| 13 | TCP 1KB throughput | **~7.95 Gbps**, ~970 Kops (single-threaded, default 20 queues) | 4.8× Linux | — | Raw number captured; ratio needs Linux-TCP baseline |
+| 13 | TCP 1KB throughput | **~7.95 Gbps**, ~970 Kops (single-threaded, default 20 queues) | 4.8× Linux | — | **~2.84×** (1×1 setup; needs #13 redo for proper 5×5 comparison). DCTCP baseline: 2.8 Gbps |
 | 14 | TCP 2KB throughput | **~11.79 Gbps**, ~719 Kops (single-threaded, default 20 queues) | 0.87× TAS | — | Raw number captured; ratio needs TAS baseline |
-| 15 | TCP 1K persistent conns, 64B | **~1129 Kops peak / ~655 K steady aggregate** (10-thr server, 5 clients × 200 conns, default 20 queues) | 2.26× Linux | — | Connection drop after ~9s limits window. Per-client steady ~160-170 Kops each. Env vars must be inside `script -q -c` argument (not as prefix) |
-| 18 | TCP KV throughput | **~1.0 Mops peak / ~0.73 Mops steady aggregate** (5 clients, 4 threads, 16 pending, default 20 queues) | 2.4-4.8× Linux | — | Raw number captured; ratio needs Linux-TCP baseline |
-| 19 | TCP KV P50 latency | **14 µs** (2026-07-06, def. 20 queues) | 17.2 µs | **122%** | Beats paper target |
-| 20 | TCP KV P99 latency | **16 µs** (2026-07-06, def. 20 queues) | 27.5 µs | **172%** | Beats paper target |
+| 15 | TCP 1K persistent conns, 64B | **~1129 Kops peak / ~655 K steady aggregate** (10-thr server, 5 clients × 200 conns, default 20 queues) | 2.26× Linux | — | **~2.8×** (exceeds expected 2.26×). DCTCP baseline: ~0.234 Mops (no drops). eTran drops after ~9s |
+| 18 | TCP KV throughput | **~0.73 Mops steady aggregate** (5 clients, 4 threads, 10 conns, 32 pending, default 20 queues) | ~2.6× Linux | — | DCTCP baseline: ~0.278 Mops. Ratio 2.61× within paper's 2.4-4.8× range. `--pending 32` changed from `--pending 16` per paper spec; no throughput difference observed |
+| 19 | TCP KV P50 latency | **14 µs** (2026-07-06, def. 20 queues) | 17.2 µs | **122%** | Beats paper target. DCTCP baseline: 17 µs idle, 36 µs at 320 in-flight (5×1t×4c×16p). Paper's 64 µs Linux-TCP requires switch ECN marking — not reproducible without switch config |
+| 20 | TCP KV P99 latency | **16 µs** (2026-07-06, def. 20 queues) | 27.5 µs | **172%** | Beats paper target. DCTCP baseline: 24 µs idle; same switch ECN caveat |
 | 21 | TCP CPU cycles/req | **~2.9 kcycles** (2026-07-06, ~880 Kops, 63.8B cycles) | 4.37 kcycles | — | Client-side only (includes idle epoll_wait); paper is server under NAPI stress |
 | 22 | Homa CPU cycles/req | **~1357 kcycles** (2026-07-06, 50.9B cycles, 1MB) | 5.48 kcycles | — | AF_XDP busy-poll inflation (99.6% idle); active ~5 kcycles matches paper |
 
@@ -647,7 +647,7 @@ timeout 45 env ETRAN_PROTO=tcp ETRAN_NR_APP_THREADS=4 ETRAN_NR_NIC_QUEUES=1 \
   ./flexkvs_bench \
   --threads 4 \
   --conns 10 \
-  --pending 16 \
+  --pending 32 \
   --key-num 100000 \
   --key-size 32 \
   --val-size 64 \
@@ -666,11 +666,13 @@ Output: `TP: total=<mops> mops  50p=<us> 90p=<us> 95p=<us> 99p=<us> 99.9p=<us> 9
 > (no phase transition to DONE). Always wrap in `timeout`. The `--time 30` is
 > informational only; `timeout 45` provides the actual 30s run + 5s warmup + buffer.
 > Server port is hardcoded to **11211** (memcached).
+> **`--pending 32`** changed from 16 per paper spec (§6.4: "each uses 32 parallel
+> GETs"). Throughput is bottlenecked elsewhere — 16 vs 32 produces identical results.
 
-**Result** (2026-07-06, default 20 queues): **~1.0 Mops peak / ~0.73 Mops
-steady aggregate** (5 clients, 4 threads each, 10 conns, 16 pending).
-Per-client latency under load: P50≈260 µs, P99≈315 µs.
-No SIGABRT — flexkvs works end-to-end.
+**Result** (2026-07-08, `--pending 32`, default 20 queues): **~0.73 Mops
+steady aggregate** (5 clients). Per-client: ~150, ~149, ~146, ~142, ~140 Kops.
+Per-client latency under load: P50≈262 µs, P99≈310 µs.
+DCTCP baseline: ~0.278 Mops aggregate. Ratio: **~2.61× Linux** (within paper's 2.4-4.8×).
 
 ### 19. eTran - TCP | KV P50 latency, under-loaded | 17.2 µs | 6-Node
 

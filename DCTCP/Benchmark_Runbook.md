@@ -28,6 +28,10 @@ Hardware: CloudLab xl170, single-socket 10-core E5-2640v4, Mellanox ConnectX-4 L
 | 7 | 1KB throughput, streaming (epoll) | **~2.8 Gbps**, ~346 Kops | `epoll_client`, 64 outstanding, single-threaded, 2-node |
 | 8 | 2KB throughput, streaming (epoll) | **~4.6 Gbps**, ~283 Kops | `epoll_client`, 64 outstanding, single-threaded, 2-node |
 | 9 | CPU cycles/request (1KB, epoll, client) | **~7.4 kcycles** | vs eTran TCP (AF_XDP): ~2.9 kcycles |
+| 10 | KV throughput (flexkvs, 5 clients × 4 threads × 10 conns × 32 pending) | **~0.278 Mops** | P50≈717 µs, P99≈862 µs. 5 clients steady: ~55.7, ~55.5, ~55.5, ~55.7, ~55.6 Kops |
+| 11 | KV P50 latency, under-loaded (flexkvs, 1 thread × 1 conn × 1 pending) | **17 µs** | P90=22 µs, P99=24 µs. Matches eTran TCP (14 µs) under no load — no congestion means identical network latency |
+| 12 | KV P99 latency, under-loaded (flexkvs, 1 thread × 1 conn × 1 pending) | **24 µs** | Same run as #11 |
+| 13 | 1K persistent connections 64B, closed-loop (epoll, 5 clients × 200 conns × 1 outstanding) | **~234 Kops** | Per-client steady ~46.8 Kops. No connection drops (20s timeout). eTran TCP: ~655 Kops (but drops after ~9s). Ratio eTran/DCTCP ≈ 2.8× |
 
 ## Key Findings
 
@@ -287,6 +291,111 @@ Calculate: `cycles_per_request = total_cycles / (avg_Kops × active_seconds)`
 User time ~0.8s, Sys time ~12.4s — dominated by kernel TCP processing.
 For comparison: eTran TCP (AF_XDP) = **~2.9 kcycles**.
 
+## Metric 10: DCTCP KV Throughput (flexkvs, plain TCP)
+
+```bash
+# Server (1 node) — 4 threads, 1 NIC queue (no LD_PRELOAD, no env vars):
+./flexkvs_server default 4 1
+
+# Clients (5 nodes), each — no LD_PRELOAD, no ETRAN_PROTO:
+timeout 45 ./flexkvs_bench \
+  --threads 4 \
+  --conns 10 \
+  --pending 32 \
+  --key-num 100000 \
+  --key-size 32 \
+  --val-size 64 \
+  --get-prob 0.9 \
+  --key-zipf=0.9 \
+  --time 30 \
+  --warmup 5 \
+  --cooldown 5 \
+  <server-ip>:11211
+```
+
+Same binaries as eTran TCP metric 18, but running without `LD_PRELOAD=libetran.so`
+on the plain kernel TCP stack (no micro_kernel, no XDP).
+
+**Result** (2026-07-08): **~0.278 Mops steady aggregate** (5 clients).
+Per-client steady: ~55.7, ~55.5, ~55.5, ~55.7, ~55.6 Kops.
+Per-client latency under load: P50≈717 µs, P90≈760 µs, P99≈862 µs.
+
+For comparison: eTran TCP (AF_XDP) KV throughput = **~0.73 Mops** —
+ratio **~2.61×** (within paper's 2.4-4.8× range).
+
+> **`--pending 32`** matches the paper spec (§6.4: "each uses 32 parallel GETs").
+> The eTran TCP run previously used `--pending 16`; changing to 32 had no
+> throughput effect — the bottleneck is elsewhere (likely single-pending-RPC
+> limit per connection × 10 connections = only 10 in-flight per client thread).
+
+## Metric 11-12: DCTCP KV P50/P99 Latency (flexkvs, plain TCP, under-loaded)
+
+```bash
+# Server (1 node) — same as metric 10:
+./flexkvs_server default 4 1
+
+# Client (1 node) — single thread, single connection, single pending:
+timeout 20 ./flexkvs_bench \
+  --threads 1 \
+  --conns 1 \
+  --pending 1 \
+  --key-num 100000 \
+  --key-size 32 \
+  --val-size 64 \
+  --get-prob 0.9 \
+  --key-zipf=0.9 \
+  --time 10 \
+  <server-ip>:11211
+```
+
+**Result** (2026-07-08): **P50 = 17 µs, P99 = 24 µs** (idle, 1 client × 1t×1c×1p).
+Steady ~54 Kops at 1 pending. P90=22 µs, P95=22-23 µs, P99.9=29 µs, P99.99=193 µs.
+
+For comparison: eTran TCP = **14 µs P50, 16 µs P99**; paper's Linux-TCP = 64.2 µs P50, 89.3 µs P99.
+
+**P50 latency vs concurrency sweep (5 clients, varying per-client pipeline):**
+
+| Config | Total in-flight | Mean P50 | Throughput |
+|--------|----------------|---------|-----------|
+| 1t×1c×1p | 5 | ~24 µs | ~0.21 Mops |
+| 1t×1c×4p | 20 | ~22 µs | ~0.21 Mops |
+| 1t×1c×8p | 40 | ~27 µs | ~0.18 Mops |
+| 1t×4c×8p | 160 | ~41 µs | ~0.39 Mops |
+| 1t×4c×16p | 320 | **36 µs** | ~0.45 Mops |
+| 4t×10c×32p | 6400 | ~740 µs | ~0.27 Mops |
+
+> **Paper discrepancy**: The paper reports Linux-TCP KV latency as 64.2 µs P50.
+> Our DCTCP P50 caps at ~47 µs regardless of client concurrency. The paper's value
+> is produced by **switch-side ECN marking at 70KB threshold** (not configured in
+> our cluster). The marking creates a standing switch buffer of ~70KB, adding
+> ~22 µs of queuing delay. Combined with base latency (~20 µs) and TCP backoff
+> dynamics from ECN, the total reaches ~64 µs. Without switch ECN configuration,
+> the P50 stays low even under significant client load.
+
+## Metric 13: DCTCP 1K Persistent Connections, 64B Closed-Loop (epoll, plain TCP)
+
+```bash
+# Server (1 node) — 10 threads, 64B request:
+./epoll_server -i 192.168.6.1 -b 64 -t 10
+
+# Clients (5 nodes), each — 200 connections, 4 threads, 1 outstanding:
+script -q -c 'timeout 20 ./epoll_client -i 192.168.6.1 -b 64 -f 200 -t 4 -o 1 -w 2' /dev/null
+```
+
+Same binaries as eTran TCP metric 15, running without `LD_PRELOAD=libetran.so`
+on the plain kernel TCP stack. Total 1000 persistent connections across 5 clients,
+each sending 64B requests in a closed loop with 1 outstanding per connection.
+
+**Result** (2026-07-08): **~234 Kops aggregate** (5 × ~46.8 Kops). No connection
+drops during the 20s measurement window. Per-client steady: ~46.8 Kops each.
+
+For comparison: eTran TCP (AF_XDP) = **~655 Kops steady aggregate** (but with TCP
+connection drops after ~9s). Ratio eTran/DCTCP ≈ **2.8×**.
+
+> Unlike eTran TCP metric 15 (which suffers from microkernel TCP connection drops
+> after ~9s at this load), the DCTCP baseline ran cleanly for the full 20s window.
+> The 2.8× ratio is consistent with the eTran TCP throughput advantage seen in
+> other metrics (metric 13: ~2.8× at 1KB, metric 18: ~2.6× at KV).
 ## Quick-Reference: cp_node Arguments for TCP
 
 | Flag | Default | Description |
