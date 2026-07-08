@@ -17,21 +17,21 @@
 
 Hardware: CloudLab xl170, single-socket 10-core E5-2640v4, Mellanox ConnectX-4 Lx 25G, SMT=on.
 
-| # | Metric | Result | Notes |
-|---|--------|--------|-------|
-| 1 | 32B RTT latency (P50) | **22.7 µs** | Echo, single-stream, node0↔node1 |
-| 2 | 1MB throughput, single stream | **21.5 Gbps** | `--one-way`, saturating the NIC |
-| 3 | 500KB throughput, 7 clients → 1 server | **23.5 Gbps** server in | 7 × ~3.4 Gbps clients fills 25G link |
-| 4 | 500KB throughput, 1 client → 7 servers | **23.5 Gbps** client out | 7 ports × 7 servers saturates client NIC |
-| 5 | 32B RPC rate, 7 clients → 1 server | **~866 Kops** server | 7 × ~155 Kops clients (--client-max 64, --ports 1 each) |
-| 6 | 32B RPC rate, 1 client → 7 servers | **~1082 Kops** client | 7 × ~155 Kops servers (--client-max 256, --ports 7) |
-| 7 | 1KB throughput, streaming (epoll) | **~1.8-2.8 Gbps**, ~222-346 Kops | `epoll_client`, 64 outstanding, single-threaded, 2-node. Varies with switch ECN state |
-| 8 | 2KB throughput, streaming (epoll) | **~1.8-4.6 Gbps**, ~111-283 Kops | `epoll_client`, 64 outstanding, single-threaded, 2-node. Varies with switch ECN state |
-| 9 | CPU cycles/request (1KB, epoll, client) | **~7.4 kcycles** | vs eTran TCP (AF_XDP): ~2.9 kcycles |
-| 10 | KV throughput (flexkvs, 5 clients × 4 threads × 10 conns × 32 pending) | **~0.278 Mops** | P50≈717 µs, P99≈862 µs. 5 clients steady: ~55.7, ~55.5, ~55.5, ~55.7, ~55.6 Kops |
-| 11 | KV P50 latency, under-loaded (flexkvs, 1 thread × 1 conn × 1 pending) | **17 µs** | P90=22 µs, P99=24 µs. Matches eTran TCP (14 µs) under no load — no congestion means identical network latency |
-| 12 | KV P99 latency, under-loaded (flexkvs, 1 thread × 1 conn × 1 pending) | **24 µs** | Same run as #11 |
-| 13 | 1K persistent connections 64B, closed-loop (epoll, 5 clients × 200 conns × 1 outstanding) | **~234 Kops** | Per-client steady ~46.8 Kops. No connection drops (20s timeout). eTran TCP: ~655 Kops. Ratio eTran/DCTCP ≈ 2.8× |
+| #   | Metric                                                                                    | Result                           | Notes                                                                                                           |
+| --- | ----------------------------------------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| 1   | 32B RTT latency (P50)                                                                     | **22.7 µs**                      | Echo, single-stream, node0↔node1                                                                                |
+| 2   | 1MB throughput, single stream                                                             | **21.5 Gbps**                    | `--one-way`, saturating the NIC                                                                                 |
+| 3   | 500KB throughput, 7 clients → 1 server                                                    | **23.5 Gbps** server in          | 7 × ~3.4 Gbps clients fills 25G link                                                                            |
+| 4   | 500KB throughput, 1 client → 7 servers                                                    | **23.5 Gbps** client out         | 7 ports × 7 servers saturates client NIC                                                                        |
+| 5   | 32B RPC rate, 7 clients → 1 server                                                        | **~866 Kops** server             | 7 × ~155 Kops clients (--client-max 64, --ports 1 each)                                                         |
+| 6   | 32B RPC rate, 1 client → 7 servers                                                        | **~1082 Kops** client            | 7 × ~155 Kops servers (--client-max 256, --ports 7)                                                             |
+| 7   | 1KB throughput, streaming (epoll)                                                         | **~1.8-2.8 Gbps**, ~222-346 Kops | `epoll_client`, 64 outstanding, single-threaded, 2-node. Varies with switch ECN state                           |
+| 8   | 2KB throughput, streaming (epoll)                                                         | **~1.8-4.6 Gbps**, ~111-283 Kops | `epoll_client`, 64 outstanding, single-threaded, 2-node. Varies with switch ECN state                           |
+| 9   | CPU cycles/request (1KB, epoll, client)                                                   | **~7.4 kcycles**                 | vs eTran TCP (AF_XDP): ~2.9 kcycles                                                                             |
+| 10  | KV throughput (flexkvs, 5 clients × 4 threads × 10 conns × 32 pending)                    | **~0.278 Mops**                  | P50≈717 µs, P99≈862 µs. 5 clients steady: ~55.7, ~55.5, ~55.5, ~55.7, ~55.6 Kops                                |
+| 11  | KV P50 latency, under-loaded (flexkvs, 1 thread × 1 conn × 1 pending)                     | **17 µs**                        | P90=22 µs, P99=24 µs. Matches eTran TCP (14 µs) under no load — no congestion means identical network latency   |
+| 12  | KV P99 latency, under-loaded (flexkvs, 1 thread × 1 conn × 1 pending)                     | **24 µs**                        | Same run as #11                                                                                                 |
+| 13  | 1K persistent connections 64B, closed-loop (epoll, 5 clients × 200 conns × 1 outstanding) | **~234 Kops**                    | Per-client steady ~46.8 Kops. No connection drops (20s timeout). eTran TCP: ~655 Kops. Ratio eTran/DCTCP ≈ 2.8× |
 
 ## Key Findings
 
@@ -357,14 +357,14 @@ For comparison: eTran TCP = **14 µs P50, 16 µs P99**; paper's Linux-TCP = 64.2
 
 **P50 latency vs concurrency sweep (5 clients, varying per-client pipeline):**
 
-| Config | Total in-flight | Mean P50 | Throughput |
-|--------|----------------|---------|-----------|
-| 1t×1c×1p | 5 | ~24 µs | ~0.21 Mops |
-| 1t×1c×4p | 20 | ~22 µs | ~0.21 Mops |
-| 1t×1c×8p | 40 | ~27 µs | ~0.18 Mops |
-| 1t×4c×8p | 160 | ~41 µs | ~0.39 Mops |
-| 1t×4c×16p | 320 | **36 µs** | ~0.45 Mops |
-| 4t×10c×32p | 6400 | ~740 µs | ~0.27 Mops |
+| Config     | Total in-flight | Mean P50  | Throughput |
+| ---------- | --------------- | --------- | ---------- |
+| 1t×1c×1p   | 5               | ~24 µs    | ~0.21 Mops |
+| 1t×1c×4p   | 20              | ~22 µs    | ~0.21 Mops |
+| 1t×1c×8p   | 40              | ~27 µs    | ~0.18 Mops |
+| 1t×4c×8p   | 160             | ~41 µs    | ~0.39 Mops |
+| 1t×4c×16p  | 320             | **36 µs** | ~0.45 Mops |
+| 4t×10c×32p | 6400            | ~740 µs   | ~0.27 Mops |
 
 > **Paper discrepancy**: The paper reports Linux-TCP KV latency as 64.2 µs P50.
 > Our DCTCP P50 caps at ~47 µs regardless of client concurrency. The paper's value
@@ -401,16 +401,16 @@ Ratio eTran/DCTCP ≈ **2.8×**.
 > other metrics (metric 13: ~3.95× at 1KB, metric 18: ~2.62× at KV).
 ## Quick-Reference: cp_node Arguments for TCP
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--protocol tcp` | `homa` | Select TCP protocol |
-| `--workload W` | `100` | Message size in bytes (or `w2`-`w5` for Homa CDFs) |
-| `--client-max N` | `1` | Max outstanding RPCs per client |
-| `--ports N` | `1` | Number of client ports / server ports |
-| `--server-nodes N` | `1` | Number of server nodes to target |
-| `--server-ports N` | `1` | Server ports per node |
-| `--first-server N` | `0` | First server node ID (`nodeN`) |
-| `--first-port N` | `5000` | Base port number (TCP default, Homa uses 4000) |
-| `--one-way` | off | Server returns 100B response (not echo) |
-| `--gbps F` | `0` | Target Gbps; 0 = send continuously |
-| `--no-trunc` | off | Allow messages >1MB (Homa compatibility limit) |
+| Flag               | Default | Description                                        |
+| ------------------ | ------- | -------------------------------------------------- |
+| `--protocol tcp`   | `homa`  | Select TCP protocol                                |
+| `--workload W`     | `100`   | Message size in bytes (or `w2`-`w5` for Homa CDFs) |
+| `--client-max N`   | `1`     | Max outstanding RPCs per client                    |
+| `--ports N`        | `1`     | Number of client ports / server ports              |
+| `--server-nodes N` | `1`     | Number of server nodes to target                   |
+| `--server-ports N` | `1`     | Server ports per node                              |
+| `--first-server N` | `0`     | First server node ID (`nodeN`)                     |
+| `--first-port N`   | `5000`  | Base port number (TCP default, Homa uses 4000)     |
+| `--one-way`        | off     | Server returns 100B response (not echo)            |
+| `--gbps F`         | `0`     | Target Gbps; 0 = send continuously                 |
+| `--no-trunc`       | off     | Allow messages >1MB (Homa compatibility limit)     |

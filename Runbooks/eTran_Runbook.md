@@ -8,28 +8,28 @@
 > has 20 combined queues. App threads on physical cores 0-9, mk control_loop
 > on core 19 (HT sibling of core 9). This matches the paper's §6 design.
 
-| # | Metric | Our Result | Paper Target | % | Bottleneck |
-|---|--------|-----------|-------------|---|-----------|
-| 1 | 32B latency (P50) | **12.59 µs** (2026-07-06, def. 20 queues) | 11.8 µs | **93%** | Same HW as paper; 7% gap under investigation (not NUMA) |
-| 2 | 1MB throughput | **16.6 Gbps** (2026-07-06, def. 20 queues) | 17.7 Gbps | **94%** | Same HW as paper; ~6% gap under investigation |
-| 3 | 7-clients→1-server 500KB | **~12.78 Gbps** server-side (2026-07-06, def. 20 queues) | 23.0 Gbps | **56%** | Homa grant/egress XDP_GEN dispatch path saturates at ~13 Gbps regardless of `--ports` (4/5/7 all hit same ceiling; 10 is worse at 8 Gbps due to client fan-out). Real bug, NOT core count (same HW as paper), NOT server parallelism, NOT buffer pool |
-| 4 | 1-client→7-servers 500KB | **~19.5 Gbps** client-side (2026-07-06, def. 20 queues) | 22.7 Gbps | **86%** | NOT NIC (paper hit 22.7 on same 25G link); XDP_GEN grant pacing + per-app-thread send rate on the client |
-| 5 | Client RPC rate, 32B (7:1) | **~927 Kops** server steady (2026-07-06, def. 20 queues) | 2.9 Mops | **32%** | Per-app-thread polling rate + BPF map contention (mk is NOT on Homa data fastpath — see Key findings) |
-| 6 | Server RPC rate, 32B (1:7) | **~1120 Kops** client steady (2026-07-06, def. 20 queues) | 3.3 Mops | **34%** | Per-app-thread polling rate + BPF map contention (mk is NOT on Homa data fastpath — see Key findings) |
-| 7 | P99 slowdown W2/W3 (short-msg) | **P99=1344 µs** (W2), **1428 µs** (W3) | 3.9–7.5× slowdown vs Linux | — | eTran RTTs only (no Linux-Homa baseline) |
-| 8 | P50 slowdown W2/W3 (short-msg) | **P50=109 µs** (W2), **115 µs** (W3) | 1.4–3.6× slowdown vs Linux | — | eTran RTTs only (no Linux-Homa baseline) |
-| 9 | RTT P50 shortest-10% W4 | **2848 µs** (eTran raw) | 4.1× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
-| 10 | RTT P50 shortest-10% W5 | **14530 µs** (eTran raw) | 3.9× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
-| 11 | RTT P99 shortest-10% W4 | **12604 µs** (eTran raw) | 4.3× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
-| 12 | RTT P99 shortest-10% W5 | **48026 µs** (eTran raw) | 2.9× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
-| 13 | TCP 1KB throughput | **~7.19 Gbps**, ~878 Kops (1×1 × 64, 2026-07-08, def. 20 queues); **~12.1 Gbps / 1474 Kops** (1×5); **~7.55 Gbps / 922 Kops** (5×5) | 4.8× Linux | — | **~3.95×** vs DCTCP (paper: 4.8×). 5×5 × 64 stable, no drops. DCTCP varies with switch ECN (1.3-2.8 Gbps) |
-| 14 | TCP 2KB throughput | **~12.29 Gbps**, ~750 Kops (1×1 × 64, 2026-07-08, def. 20 queues) | 0.87× TAS | — | Ratio needs TAS baseline; DCTCP baseline varies (1.8-4.6 Gbps) with switch ECN |
-| 15 | TCP 1K persistent conns, 64B | **~1129 Kops peak / ~655 K steady aggregate** (10-thr server, 5 clients × 200 conns, default 20 queues) | 2.26× Linux | — | **~2.8×** (exceeds expected 2.26×). DCTCP baseline: ~0.234 Mops (no drops). eTran drops no longer observed post-BPF patch |
-| 18 | TCP KV throughput | **~0.73 Mops steady aggregate** (5 clients, 4 threads, 10 conns, 32 pending, default 20 queues) | ~2.6× Linux | — | DCTCP baseline: ~0.278 Mops. Ratio 2.62× within paper's 2.4-4.8× range. `--pending 32` changed from `--pending 16` per paper spec; no throughput difference observed |
-| 19 | TCP KV P50 latency | **14 µs** (2026-07-06, def. 20 queues) | 17.2 µs | **122%** | Beats paper target. DCTCP baseline: 17 µs idle, 36 µs at 320 in-flight (5×1t×4c×16p). Paper's 64 µs Linux-TCP requires switch ECN marking — not reproducible without switch config |
-| 20 | TCP KV P99 latency | **16 µs** (2026-07-06, def. 20 queues) | 27.5 µs | **172%** | Beats paper target. DCTCP baseline: 24 µs idle; same switch ECN caveat |
-| 21 | TCP CPU cycles/req | **~2.93 kcycles** (2026-07-08, server-side, ~884 Kops, 31.1B cycles) | 4.37 kcycles | — | Server-side measured; paper value under NAPI stress includes overhead we don't see |
-| 22 | Homa CPU cycles/req | **~1357 kcycles** (2026-07-06, 50.9B cycles, 1MB) | 5.48 kcycles | — | AF_XDP busy-poll inflation (99.6% idle); active ~5 kcycles matches paper |
+| #   | Metric                         | Our Result                                                                                                                          | Paper Target               | %        | Bottleneck                                                                                                                                                                                                                                            |
+| --- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | 32B latency (P50)              | **12.59 µs** (2026-07-06, def. 20 queues)                                                                                           | 11.8 µs                    | **93%**  | Same HW as paper; 7% gap under investigation (not NUMA)                                                                                                                                                                                               |
+| 2   | 1MB throughput                 | **16.6 Gbps** (2026-07-06, def. 20 queues)                                                                                          | 17.7 Gbps                  | **94%**  | Same HW as paper; ~6% gap under investigation                                                                                                                                                                                                         |
+| 3   | 7-clients→1-server 500KB       | **~12.78 Gbps** server-side (2026-07-06, def. 20 queues)                                                                            | 23.0 Gbps                  | **56%**  | Homa grant/egress XDP_GEN dispatch path saturates at ~13 Gbps regardless of `--ports` (4/5/7 all hit same ceiling; 10 is worse at 8 Gbps due to client fan-out). Real bug, NOT core count (same HW as paper), NOT server parallelism, NOT buffer pool |
+| 4   | 1-client→7-servers 500KB       | **~19.5 Gbps** client-side (2026-07-06, def. 20 queues)                                                                             | 22.7 Gbps                  | **86%**  | NOT NIC (paper hit 22.7 on same 25G link); XDP_GEN grant pacing + per-app-thread send rate on the client                                                                                                                                              |
+| 5   | Client RPC rate, 32B (7:1)     | **~927 Kops** server steady (2026-07-06, def. 20 queues)                                                                            | 2.9 Mops                   | **32%**  | Per-app-thread polling rate + BPF map contention (mk is NOT on Homa data fastpath — see Key findings)                                                                                                                                                 |
+| 6   | Server RPC rate, 32B (1:7)     | **~1120 Kops** client steady (2026-07-06, def. 20 queues)                                                                           | 3.3 Mops                   | **34%**  | Per-app-thread polling rate + BPF map contention (mk is NOT on Homa data fastpath — see Key findings)                                                                                                                                                 |
+| 7   | P99 slowdown W2/W3 (short-msg) | **P99=1344 µs** (W2), **1428 µs** (W3)                                                                                              | 3.9–7.5× slowdown vs Linux | —        | eTran RTTs only (no Linux-Homa baseline)                                                                                                                                                                                                              |
+| 8   | P50 slowdown W2/W3 (short-msg) | **P50=109 µs** (W2), **115 µs** (W3)                                                                                                | 1.4–3.6× slowdown vs Linux | —        | eTran RTTs only (no Linux-Homa baseline)                                                                                                                                                                                                              |
+| 9   | RTT P50 shortest-10% W4        | **2848 µs** (eTran raw)                                                                                                             | 4.1× vs Linux-Homa         | —        | Needs Linux baseline for slowdown ratio                                                                                                                                                                                                               |
+| 10  | RTT P50 shortest-10% W5        | **14530 µs** (eTran raw)                                                                                                            | 3.9× vs Linux-Homa         | —        | Needs Linux baseline for slowdown ratio                                                                                                                                                                                                               |
+| 11  | RTT P99 shortest-10% W4        | **12604 µs** (eTran raw)                                                                                                            | 4.3× vs Linux-Homa         | —        | Needs Linux baseline for slowdown ratio                                                                                                                                                                                                               |
+| 12  | RTT P99 shortest-10% W5        | **48026 µs** (eTran raw)                                                                                                            | 2.9× vs Linux-Homa         | —        | Needs Linux baseline for slowdown ratio                                                                                                                                                                                                               |
+| 13  | TCP 1KB throughput             | **~7.19 Gbps**, ~878 Kops (1×1 × 64, 2026-07-08, def. 20 queues); **~12.1 Gbps / 1474 Kops** (1×5); **~7.55 Gbps / 922 Kops** (5×5) | 4.8× Linux                 | —        | **~3.95×** vs DCTCP (paper: 4.8×). 5×5 × 64 stable, no drops. DCTCP varies with switch ECN (1.3-2.8 Gbps)                                                                                                                                             |
+| 14  | TCP 2KB throughput             | **~12.29 Gbps**, ~750 Kops (1×1 × 64, 2026-07-08, def. 20 queues)                                                                   | 0.87× TAS                  | —        | Ratio needs TAS baseline; DCTCP baseline varies (1.8-4.6 Gbps) with switch ECN                                                                                                                                                                        |
+| 15  | TCP 1K persistent conns, 64B   | **~1129 Kops peak / ~655 K steady aggregate** (10-thr server, 5 clients × 200 conns, default 20 queues)                             | 2.26× Linux                | —        | **~2.8×** (exceeds expected 2.26×). DCTCP baseline: ~0.234 Mops (no drops). eTran drops no longer observed post-BPF patch                                                                                                                             |
+| 18  | TCP KV throughput              | **~0.73 Mops steady aggregate** (5 clients, 4 threads, 10 conns, 32 pending, default 20 queues)                                     | ~2.6× Linux                | —        | DCTCP baseline: ~0.278 Mops. Ratio 2.62× within paper's 2.4-4.8× range. `--pending 32` changed from `--pending 16` per paper spec; no throughput difference observed                                                                                  |
+| 19  | TCP KV P50 latency             | **14 µs** (2026-07-06, def. 20 queues)                                                                                              | 17.2 µs                    | **122%** | Beats paper target. DCTCP baseline: 17 µs idle, 36 µs at 320 in-flight (5×1t×4c×16p). Paper's 64 µs Linux-TCP requires switch ECN marking — not reproducible without switch config                                                                    |
+| 20  | TCP KV P99 latency             | **16 µs** (2026-07-06, def. 20 queues)                                                                                              | 27.5 µs                    | **172%** | Beats paper target. DCTCP baseline: 24 µs idle; same switch ECN caveat                                                                                                                                                                                |
+| 21  | TCP CPU cycles/req             | **~2.93 kcycles** (2026-07-08, server-side, ~884 Kops, 31.1B cycles)                                                                | 4.37 kcycles               | —        | Server-side measured; paper value under NAPI stress includes overhead we don't see                                                                                                                                                                    |
+| 22  | Homa CPU cycles/req            | **~1357 kcycles** (2026-07-06, 50.9B cycles, 1MB)                                                                                   | 5.48 kcycles               | —        | AF_XDP busy-poll inflation (99.6% idle); active ~5 kcycles matches paper                                                                                                                                                                              |
 
 **Key findings:**
 - **Homa data path is FASTPATH — microkernel is NOT on it** (verified in
@@ -168,27 +168,27 @@ Verified against `homa_app/cp_node.cc` (eTran) and upstream `PlatformLab/HomaMod
 
 ### Client options (`cp_node client [opts]`)
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--workload` | string | `"100"` | `w1`-`w5` (Homa CDFs) or integer for fixed-size bytes |
-| `--client-max` | int | `1` | Max outstanding RPCs per machine (÷ ports) |
-| `--ports` | int | `1` | Sending threads (one per port) |
-| `--server-nodes` | int | `1` | Number of server nodes to target |
-| `--server-ports` | int | `1` | Server ports per node |
-| `--first-server` | int | `1` | First server node ID (`nodeN`) |
-| `--gbps` | float | `0.0` | Target Gbps; **0 = send continuously** (closed-loop) |
-| `--one-way` | flag | `false` | Server returns 100B response (not echo) |
-| `--id` | int | `-1` | This node's ID; skip `node{id}` as target |
-| `--both` | int | `0` | Start as server, wait N seconds, then start client |
-| `--unloaded` | int | `0` | Baseline RTT sweep per message size (Homa only) |
-| `--queues` | int | `1` | NIC queues (eTran). **Never set on client** — kills throughput |
+| Flag             | Type   | Default | Description                                                    |
+| ---------------- | ------ | ------- | -------------------------------------------------------------- |
+| `--workload`     | string | `"100"` | `w1`-`w5` (Homa CDFs) or integer for fixed-size bytes          |
+| `--client-max`   | int    | `1`     | Max outstanding RPCs per machine (÷ ports)                     |
+| `--ports`        | int    | `1`     | Sending threads (one per port)                                 |
+| `--server-nodes` | int    | `1`     | Number of server nodes to target                               |
+| `--server-ports` | int    | `1`     | Server ports per node                                          |
+| `--first-server` | int    | `1`     | First server node ID (`nodeN`)                                 |
+| `--gbps`         | float  | `0.0`   | Target Gbps; **0 = send continuously** (closed-loop)           |
+| `--one-way`      | flag   | `false` | Server returns 100B response (not echo)                        |
+| `--id`           | int    | `-1`    | This node's ID; skip `node{id}` as target                      |
+| `--both`         | int    | `0`     | Start as server, wait N seconds, then start client             |
+| `--unloaded`     | int    | `0`     | Baseline RTT sweep per message size (Homa only)                |
+| `--queues`       | int    | `1`     | NIC queues (eTran). **Never set on client** — kills throughput |
 
 ### Server options (`cp_node server [opts]`)
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--ports` | int | `1` | Listening ports/threads. `--ports 5/7` verified safe with BPF XDP_EGRESS patch applied (no buffer-pool assert); `--ports 10` works but throughput drops because 1-thread client can't fill 10 server ports. Use 4 (paper's hint) or any of 4/5/7 — all hit the same ~13 Gbps ceiling |
-| `--first-port` | int | `4000` | Lowest port number |
+| Flag           | Type | Default | Description                                                                                                                                                                                                                                                                          |
+| -------------- | ---- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--ports`      | int  | `1`     | Listening ports/threads. `--ports 5/7` verified safe with BPF XDP_EGRESS patch applied (no buffer-pool assert); `--ports 10` works but throughput drops because 1-thread client can't fill 10 server ports. Use 4 (paper's hint) or any of 4/5/7 — all hit the same ~13 Gbps ceiling |
+| `--first-port` | int  | `4000`  | Lowest port number                                                                                                                                                                                                                                                                   |
 
 ### Key semantics
 
@@ -315,12 +315,12 @@ Reproduced on fresh reboot with default 20 queues. The shortfall vs paper's
 burst then stall (BPF grant overwhelmed at 448 concurrent RPCs).
 
 **`--ports` sweep on server (2026-07-06, clean restart between each)**:
-| Server `--ports` | Steady Gbps | Peak Gbps | Notes |
-|---:|---:|---:|---|
-| 4 | 12.9 | — | baseline |
-| 5 | 12.78 | 13.77 | no crash |
-| 7 | 12.77 | 12.77 | no crash |
-| 10 | 8.01 | 9.09 | client fan-out limit; 3 ports idle |
+| Server `--ports` | Steady Gbps | Peak Gbps | Notes                              |
+| ---------------: | ----------: | --------: | ---------------------------------- |
+|                4 |        12.9 |         — | baseline                           |
+|                5 |       12.78 |     13.77 | no crash                           |
+|                7 |       12.77 |     12.77 | no crash                           |
+|               10 |        8.01 |      9.09 | client fan-out limit; 3 ports idle |
 
 4/5/7 are equivalent (within 1% noise). 10 is worse due to client-side
 1-thread fan-out, not server. No buffer-pool asserts at any port count with
@@ -443,11 +443,11 @@ These match the upstream Homa `cp_vs_tcp` script:
 **Per-workload parameters** (change all three for each run):
 
 | Workload | `--workload` | `--gbps` | `RUN_SECONDS` |
-|----------|-------------|----------|---------------|
-| W2       | `w2`        | `3.2`    | `5`           |
-| W3       | `w3`        | `14`     | `10`          |
-| W4       | `w4`        | `20`     | `20`          |
-| W5       | `w5`        | `20`     | `30`          |
+| -------- | ------------ | -------- | ------------- |
+| W2       | `w2`         | `3.2`    | `5`           |
+| W3       | `w3`         | `14`     | `10`          |
+| W4       | `w4`         | `20`     | `20`          |
+| W5       | `w5`         | `20`     | `30`          |
 
 #### All-to-all topology (paper's setup)
 
@@ -521,12 +521,12 @@ awk '{print $1, $2}' /tmp/rtts_node*.txt | sort -n | \
 
 eTran-only RTT values (Linux-Homa baseline postponed):
 
-| Workload | Offered Load | Duration | Aggregate Server Kops | Overall P50 | Overall P99 | Shortest-10% P50 | Shortest-10% P99 |
-|:---------|:-------------|:---------|:---------------------|:------------|:------------|:-----------------|:-----------------|
-| W2       | 3.2 Gbps     | 5s       | ~3990 Kops           | **109 µs**  | **1344 µs** | **91 µs**        | **118 µs**       |
-| W3       | 14 Gbps      | 10s      | ~707 Kops            | **115 µs**  | **1428 µs** | **110 µs**       | **1462 µs**      |
-| W4       | 20 Gbps      | 20s      | ~84 Kops             | **3068 µs** | **13713 µs**| **2848 µs**      | **12604 µs**     |
-| W5       | 20 Gbps      | 30s      | ~16 Kops             | **18007 µs**| **130044 µs**| **14530 µs**    | **48026 µs**     |
+| Workload | Offered Load | Duration | Aggregate Server Kops | Overall P50  | Overall P99   | Shortest-10% P50 | Shortest-10% P99 |
+| :------- | :----------- | :------- | :-------------------- | :----------- | :------------ | :--------------- | :--------------- |
+| W2       | 3.2 Gbps     | 5s       | ~3990 Kops            | **109 µs**   | **1344 µs**   | **91 µs**        | **118 µs**       |
+| W3       | 14 Gbps      | 10s      | ~707 Kops             | **115 µs**   | **1428 µs**   | **110 µs**       | **1462 µs**      |
+| W4       | 20 Gbps      | 20s      | ~84 Kops              | **3068 µs**  | **13713 µs**  | **2848 µs**      | **12604 µs**     |
+| W5       | 20 Gbps      | 30s      | ~16 Kops              | **18007 µs** | **130044 µs** | **14530 µs**     | **48026 µs**     |
 
 > **W2/W3** are short-message dominated workloads — low latency (109-115 µs P50) reflects
 > Homa's efficient small-message handling under moderate load.
@@ -787,18 +787,18 @@ total_cycles × (active_us / elapsed_us).
 Requires `perf` with hardware counters. Run against TCP and Homa benchmarks
 under single-NAPI-context stress. The source code categories are:
 
-| Paper Category     | Kernel Symbols to Match                              |
-|:-------------------|:-----------------------------------------------------|
-| Application        | User-space app code (cp_node/epoll_client main loop) |
-| Socket/RPC         | `__sys_sendto`, `__sys_recvmsg`, socket layer        |
-| Data Copy          | `copy_user_enhanced_fast_string`, `memcpy_erms`      |
-| Sk_buff            | `__alloc_skb`, `__kfree_skb`, `skb_*`                |
-| TCP/Homa + IP      | `tcp_*`, `homa_*`, `ip_*`, `ip6_*`                  |
-| Lock/Unlock        | `_raw_spin_lock`, `mutex_lock`, `mutex_unlock`       |
-| NIC Driver         | `mlx5e_*`, `mlx5_*` (adapt to your NIC driver)      |
-| Memory Mgmt        | `__alloc_pages`, `__free_pages`, `slab_*`            |
-| Scheduling         | `__schedule`, `schedule`, `try_to_wake_up`           |
-| Other              | Everything else                                      |
+| Paper Category | Kernel Symbols to Match                              |
+| :------------- | :--------------------------------------------------- |
+| Application    | User-space app code (cp_node/epoll_client main loop) |
+| Socket/RPC     | `__sys_sendto`, `__sys_recvmsg`, socket layer        |
+| Data Copy      | `copy_user_enhanced_fast_string`, `memcpy_erms`      |
+| Sk_buff        | `__alloc_skb`, `__kfree_skb`, `skb_*`                |
+| TCP/Homa + IP  | `tcp_*`, `homa_*`, `ip_*`, `ip6_*`                   |
+| Lock/Unlock    | `_raw_spin_lock`, `mutex_lock`, `mutex_unlock`       |
+| NIC Driver     | `mlx5e_*`, `mlx5_*` (adapt to your NIC driver)       |
+| Memory Mgmt    | `__alloc_pages`, `__free_pages`, `slab_*`            |
+| Scheduling     | `__schedule`, `schedule`, `try_to_wake_up`           |
+| Other          | Everything else                                      |
 
 ```bash
 perf record -g -F 99 -o /tmp/perf.data <benchmark-command>
@@ -861,58 +861,58 @@ sudo timeout 15 taskset -c 3 ./xdpsock -i ens1f1np1 -q 3 -r -N -z
 
 ### Benchmark / application binaries
 
-| File | Key Locations |
-|:--|:--|
-| `homa_app/cp_node.cc` | L54 `IF_NAME`="ens1f1np1"; L1426 `server_stats`, L1476 `client_stats` (Kops/Gbps/RTT P50-P99.9); L1603 `client_cmd` defaults, L1929 `server_cmd`; L1616 `workload = "100"` default |
-| `homa_app/dist.cc` | `w1`-`w5` CDF arrays; `dist_lookup()` handles int→fixed-size or `wN` name |
-| `tcp_app/epoll_client.cc` | `parse_args`: `-b`(msg size) `-i` `-f`(flows) `-t`(threads) `-o`(outstanding) `-w`(wait) `-l`(max_buf_size) `-s`(response toggle) |
-| `tcp_app/epoll_server.cc` | `parse_args`: `-b` `-i` `-t` `-l` `-s`; runs `while(1)`, no loop count |
-| `tcp_app/flexkvs_bench.cc` | Uses `flexkvs/commandline.c` `parse_settings()`; `--time`/`--warmup`/`--cooldown` stored but NEVER enforced |
-| `tcp_app/flexkvs_server.cc` | 3 positional args: `CONFIG THREADS QUEUES`; port hardcoded to **11211** |
-| `tcp_app/lat_client.cc` | 500K ping-pongs, sorted P50/P99/P99.9 output; `-c` flag broken (fallthrough bug) |
+| File                        | Key Locations                                                                                                                                                                      |
+| :-------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `homa_app/cp_node.cc`       | L54 `IF_NAME`="ens1f1np1"; L1426 `server_stats`, L1476 `client_stats` (Kops/Gbps/RTT P50-P99.9); L1603 `client_cmd` defaults, L1929 `server_cmd`; L1616 `workload = "100"` default |
+| `homa_app/dist.cc`          | `w1`-`w5` CDF arrays; `dist_lookup()` handles int→fixed-size or `wN` name                                                                                                          |
+| `tcp_app/epoll_client.cc`   | `parse_args`: `-b`(msg size) `-i` `-f`(flows) `-t`(threads) `-o`(outstanding) `-w`(wait) `-l`(max_buf_size) `-s`(response toggle)                                                  |
+| `tcp_app/epoll_server.cc`   | `parse_args`: `-b` `-i` `-t` `-l` `-s`; runs `while(1)`, no loop count                                                                                                             |
+| `tcp_app/flexkvs_bench.cc`  | Uses `flexkvs/commandline.c` `parse_settings()`; `--time`/`--warmup`/`--cooldown` stored but NEVER enforced                                                                        |
+| `tcp_app/flexkvs_server.cc` | 3 positional args: `CONFIG THREADS QUEUES`; port hardcoded to **11211**                                                                                                            |
+| `tcp_app/lat_client.cc`     | 500K ping-pongs, sorted P50/P99/P99.9 output; `-c` flag broken (fallthrough bug)                                                                                                   |
 
 ### Microkernel (slow-path only — data is fastpath via eBPF→XSK)
 
-| File | Key Locations |
-|:--|:--|
-| `micro_kernel/micro_kernel.cc` | L51 `opt_num_queues=20` default; L106-122 `-q`(queues) `-i`(iface) `-b`(busy-poll) `-n`(napi) `-l`(tcp buf); L203 main launches `monitor_thread`, L244 `thread_init`, L259 `wait_thread` |
-| `micro_kernel/runtime/defs.h` | **L24** `MAX_APP_THREADS=20`; L25 `MAX_SUPPORT_APP=32`; **L26 `CP_CPU=19`** (online with HT; control_loop pins to SMT sibling of core 9); L28-31 `enrollment_to_ms=0`, `network_to_ms=0`, `sp_interval_ms=1`; L33 `IO_BATCH_SIZE=32`; L44 `thread_init` extern |
+| File                            | Key Locations                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| :------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `micro_kernel/micro_kernel.cc`  | L51 `opt_num_queues=20` default; L106-122 `-q`(queues) `-i`(iface) `-b`(busy-poll) `-n`(napi) `-l`(tcp buf); L203 main launches `monitor_thread`, L244 `thread_init`, L259 `wait_thread`                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `micro_kernel/runtime/defs.h`   | **L24** `MAX_APP_THREADS=20`; L25 `MAX_SUPPORT_APP=32`; **L26 `CP_CPU=19`** (online with HT; control_loop pins to SMT sibling of core 9); L28-31 `enrollment_to_ms=0`, `network_to_ms=0`, `sp_interval_ms=1`; L33 `IO_BATCH_SIZE=32`; L44 `thread_init` extern                                                                                                                                                                                                                                                                                                                               |
 | `micro_kernel/control_plane.cc` | **L48** `TICK_US=1000` (1ms); **L1070 `control_loop()`** — single worker thread; L1095-1130 sequential `poll_uds`→`poll_lrpc`→`poll_network`→`poll_tcp_handshake_events`→`poll_tcp_cc_to`→`poll_homa_to` + `clock_nanosleep`; **L1137 `thread_init()`**; **L1148** single `pthread_create(control_loop)`; **L1153-1155 `CPU_SET(CP_CPU)` + `pthread_setaffinity_np` (return value NOT checked)**; L1374 `poll_lrpc` (drains per-app-thread LRPCs, calls `process_cmd`); L1406 `process_packet` (TCP-only — calls `tcp_packet`); L1487 `poll_network` (reclaims CQ + `epoll_wait` on XSK fds) |
-| `micro_kernel/homa.cc` | L485 `poll_homa_to` (1ms batch scan of BPF RPC map for zombies/retransmits); L502 `bpf_map_lookup_batch`; **L790 `process_homa_cmd`** — handles ONLY `APPOUT_HOMA_BIND` (L796) / `APPOUT_HOMA_CLOSE` (L803); no Homa data path here |
-| `micro_kernel/tcp.cc` | `tcp_packet` — slow-path TCP processing (handshake/close/cc timeouts) invoked from `process_packet` |
+| `micro_kernel/homa.cc`          | L485 `poll_homa_to` (1ms batch scan of BPF RPC map for zombies/retransmits); L502 `bpf_map_lookup_batch`; **L790 `process_homa_cmd`** — handles ONLY `APPOUT_HOMA_BIND` (L796) / `APPOUT_HOMA_CLOSE` (L803); no Homa data path here                                                                                                                                                                                                                                                                                                                                                          |
+| `micro_kernel/tcp.cc`           | `tcp_packet` — slow-path TCP processing (handshake/close/cc timeouts) invoked from `process_packet`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 ### eBPF programs (fastpath — run at NIC)
 
-| File | Key Locations |
-|:--|:--|
-| `micro_kernel/eBPF/entrance/entrance.c` | L48 `SEC("xdp_sock")` — parses eth/IP, tail-calls into Homa/TCP transport programs; L82 `SEC("xdp_gen")`, L93 `SEC("xdp_egress")` — dispatch by umem_id; L104 `xdp/cpumap` |
-| `micro_kernel/eBPF/homa/main.c` | L29 `SEC("xdp_gen")` — **grant generator**: L59 `granting_idx[cpu]++`, L78 `min(nr_grant_candidate[cpu], HOMA_OVERCOMMITMENT)`, **L192 `return XDP_TX`** (emit grant at NIC); L211 `SEC("xdp_egress")`, **L248 `c->type != DATA`** check (XDP_EGRESS grant drop bug — apply patch at L235-248); L293 `SEC("xdp_sock")` — DATA redirector; **L418,451,460,588 `bpf_redirect_map(&xsks_map, socket_id, XDP_DROP)`** (push DATA → app XSK, bypasses mk); **L595 `SEC("xdp_gen/choose_rpc_to_grant")`** + L1247,1344,1440,1536,1632,1728,1824,1920 `SEC("xdp_gen/complete_grant_N")` (8-step grant choose) — tail-call invocation sites at L1240,1338,1435,1531,1627,1723,1819,1915 |
-| `micro_kernel/eBPF/tcp/main.c` | L30 `slow_path_map`; L38 `xsks_map` (XSKMAP); L40 `SEC("xdp_gen")` — TCP ACK gen (`bpf_xdp_adjust_tail`); L147 `SEC("xdp_egress")`; **L258 `bpf_redirect_map(&xsks_map, c->qid2xsk[ctx->rx_queue_index])`** (fastpath data → app); L265 `SEC("xdp_sock")`; L323 `XDP_PASS`; **L367,378 `bpf_redirect_map(&xsks_map, ...)`** (sp/xid redirect); L373 `slow_path_map` lookup (→ mk) |
+| File                                    | Key Locations                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| :-------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `micro_kernel/eBPF/entrance/entrance.c` | L48 `SEC("xdp_sock")` — parses eth/IP, tail-calls into Homa/TCP transport programs; L82 `SEC("xdp_gen")`, L93 `SEC("xdp_egress")` — dispatch by umem_id; L104 `xdp/cpumap`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `micro_kernel/eBPF/homa/main.c`         | L29 `SEC("xdp_gen")` — **grant generator**: L59 `granting_idx[cpu]++`, L78 `min(nr_grant_candidate[cpu], HOMA_OVERCOMMITMENT)`, **L192 `return XDP_TX`** (emit grant at NIC); L211 `SEC("xdp_egress")`, **L248 `c->type != DATA`** check (XDP_EGRESS grant drop bug — apply patch at L235-248); L293 `SEC("xdp_sock")` — DATA redirector; **L418,451,460,588 `bpf_redirect_map(&xsks_map, socket_id, XDP_DROP)`** (push DATA → app XSK, bypasses mk); **L595 `SEC("xdp_gen/choose_rpc_to_grant")`** + L1247,1344,1440,1536,1632,1728,1824,1920 `SEC("xdp_gen/complete_grant_N")` (8-step grant choose) — tail-call invocation sites at L1240,1338,1435,1531,1627,1723,1819,1915 |
+| `micro_kernel/eBPF/tcp/main.c`          | L30 `slow_path_map`; L38 `xsks_map` (XSKMAP); L40 `SEC("xdp_gen")` — TCP ACK gen (`bpf_xdp_adjust_tail`); L147 `SEC("xdp_egress")`; **L258 `bpf_redirect_map(&xsks_map, c->qid2xsk[ctx->rx_queue_index])`** (fastpath data → app); L265 `SEC("xdp_sock")`; L323 `XDP_PASS`; **L367,378 `bpf_redirect_map(&xsks_map, ...)`** (sp/xid redirect); L373 `slow_path_map` lookup (→ mk)                                                                                                                                                                                                                                                                                               |
 
 ### Application library (libetran.so — the actual fastpath polling path)
 
-| File | Key Locations |
-|:--|:--|
-| `lib/eTran_rpc.cc` | **L288 `poll_nic_rx()`** and **L426 `poll_nic_rx_block(timeout)`** — the app's RX fastpath: **L323,463 `xsk_ring_cons__peek`** on each queue's RX ring; L370,505 `client_response(qidx,d)` / L372,507 `server_request(qidx,d,remote_ip,rpcid)` (DATA → app); **L187 `xsk_ring_prod__reserve(&xsk_info->tx, rm.nr_pkt)` + L203 `kick_tx(...)`** — app TX path; L717,795 more `kick_tx` sites. L443 `_pending_*` queue drain to keep busy-poll nonblocking. **This is where Homa data packets are actually consumed and processed.** |
-| `lib/socket.cc` | L159 `socket_homa_poll` (the homa shim's blocking-poll entry, called from epoll loop at L615, L781); **L405** "Connection is closed by microkernel" idle-drop message (TCP idle timeout) |
-| `lib/eTran_posix.cc` | **L1168 `process_homa_kernel_events`** — drains `app_in` LRPC for `APPIN_HOMA_STATUS_BIND`/`CLOSE` from mk; L1228 `eTran_homa_poll_events`; L380,667,767,854,950,989 TCP XSK TX paths |
-| `lib/eTran_common.cc` | **L595 `pre_main` constructor** — reads `ETRAN_PROTO` (L600, required), `ETRAN_NR_APP_THREADS` (L598) + `ETRAN_NR_NIC_QUEUES` (L599, required for TCP) |
-| `lib/xsk_if.cc` | L20 `tx_ring_size=XSK_RING_PROD__DEFAULT_NUM_DESCS`; L38 `XDP_TX_RING` setsockopt; the per-thread XSK setup shared by app library |
-| `shared_lib/interpose.cc` | Builds `libetran.so` — LD_PRELOAD intercepts `socket`/`epoll_wait`/`read`/`write` |
+| File                      | Key Locations                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| :------------------------ | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lib/eTran_rpc.cc`        | **L288 `poll_nic_rx()`** and **L426 `poll_nic_rx_block(timeout)`** — the app's RX fastpath: **L323,463 `xsk_ring_cons__peek`** on each queue's RX ring; L370,505 `client_response(qidx,d)` / L372,507 `server_request(qidx,d,remote_ip,rpcid)` (DATA → app); **L187 `xsk_ring_prod__reserve(&xsk_info->tx, rm.nr_pkt)` + L203 `kick_tx(...)`** — app TX path; L717,795 more `kick_tx` sites. L443 `_pending_*` queue drain to keep busy-poll nonblocking. **This is where Homa data packets are actually consumed and processed.** |
+| `lib/socket.cc`           | L159 `socket_homa_poll` (the homa shim's blocking-poll entry, called from epoll loop at L615, L781); **L405** "Connection is closed by microkernel" idle-drop message (TCP idle timeout)                                                                                                                                                                                                                                                                                                                                           |
+| `lib/eTran_posix.cc`      | **L1168 `process_homa_kernel_events`** — drains `app_in` LRPC for `APPIN_HOMA_STATUS_BIND`/`CLOSE` from mk; L1228 `eTran_homa_poll_events`; L380,667,767,854,950,989 TCP XSK TX paths                                                                                                                                                                                                                                                                                                                                              |
+| `lib/eTran_common.cc`     | **L595 `pre_main` constructor** — reads `ETRAN_PROTO` (L600, required), `ETRAN_NR_APP_THREADS` (L598) + `ETRAN_NR_NIC_QUEUES` (L599, required for TCP)                                                                                                                                                                                                                                                                                                                                                                             |
+| `lib/xsk_if.cc`           | L20 `tx_ring_size=XSK_RING_PROD__DEFAULT_NUM_DESCS`; L38 `XDP_TX_RING` setsockopt; the per-thread XSK setup shared by app library                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `shared_lib/interpose.cc` | Builds `libetran.so` — LD_PRELOAD intercepts `socket`/`epoll_wait`/`read`/`write`                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 ### Shared definitions / buffer pool
 
-| File | Key Locations |
-|:--|:--|
-| `common/tran_def/homa.h` | **L8 `HOMA_MAX_MESSAGE_LENGTH = 1000000`** (off-by-one: `--workload 1000000` stalls, use 999999); L11 `enum homa_packet_type` (DATA/GRANT/RESEND/...) |
-| `common/xskbp/xsk_buffer_pool.h` | **L33 `umem_num_frames=64*XSK_RING_PROD__DEFAULT_NUM_DESCS`**; **L39 `buffers_per_slab=2*XSK_RING_PROD__DEFAULT_NUM_DESCS`**; L70 `nr_slabs`, L73 `nr_slabs_avail` — slab counters (the `--ports > 4` crash claim was **refuted 2026-07-06**: server `--ports 5/7/10` with 500KB RPCs and the BPF XDP_EGRESS patch applied run cleanly at ~12.8 Gbps; the 13 Gbps ceiling is NOT a slab limit) |
-| `micro_kernel/eBPF/homa/rpc.h` | L1584 `xmit_ctrl_pkt` (used by eBPF grant/ctrl TX); per-RPC state map structures |
-| `micro_kernel/eBPF/homa/pacing.h` | Grant pacing structures (per-CPU `granting_idx`, `nr_grant_candidate`, `finish_grant_choose`) |
+| File                              | Key Locations                                                                                                                                                                                                                                                                                                                                                                                  |
+| :-------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `common/tran_def/homa.h`          | **L8 `HOMA_MAX_MESSAGE_LENGTH = 1000000`** (off-by-one: `--workload 1000000` stalls, use 999999); L11 `enum homa_packet_type` (DATA/GRANT/RESEND/...)                                                                                                                                                                                                                                          |
+| `common/xskbp/xsk_buffer_pool.h`  | **L33 `umem_num_frames=64*XSK_RING_PROD__DEFAULT_NUM_DESCS`**; **L39 `buffers_per_slab=2*XSK_RING_PROD__DEFAULT_NUM_DESCS`**; L70 `nr_slabs`, L73 `nr_slabs_avail` — slab counters (the `--ports > 4` crash claim was **refuted 2026-07-06**: server `--ports 5/7/10` with 500KB RPCs and the BPF XDP_EGRESS patch applied run cleanly at ~12.8 Gbps; the 13 Gbps ceiling is NOT a slab limit) |
+| `micro_kernel/eBPF/homa/rpc.h`    | L1584 `xmit_ctrl_pkt` (used by eBPF grant/ctrl TX); per-RPC state map structures                                                                                                                                                                                                                                                                                                               |
+| `micro_kernel/eBPF/homa/pacing.h` | Grant pacing structures (per-CPU `granting_idx`, `nr_grant_candidate`, `finish_grant_choose`)                                                                                                                                                                                                                                                                                                  |
 
 ### Driver micro-bench
 
-| File | Key Locations |
-|:--|:--|
+| File                    | Key Locations                                                                                                                                    |
+| :---------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------- |
 | `bench-afxdp/xdpsock.c` | `-r`(rx-drop) `-t`(tx-only) `-l`(l2fwd) modes, `-s` pkt size, `-b` batch, `-z` zero-copy, `-N` native mode (used for Table 3/4 AF_XDP baselines) |
 
 ---
@@ -953,22 +953,22 @@ fresh full-cluster restart (`pgrep -x micro_kernel` kill, XDP detach,
 `/dev/shm/*` clean, mk restart) before each test. Numbers are eTran
 Homa, default 20 queues, SMT=ON, CP_CPU=19.
 
-| Change applied (cumulative) | Metric 1 P50 (32B) | Metric 3 Gbps (500KB) | Metric 5 Kops (32B) | Verdict |
-|---|---:|---:|---:|---|
-| **Baseline (before any of this work)** | 12.59 µs | 12.78 Gbps | 927 Kops | reference |
-| `irqbalance` disabled | 12.5 µs | 12.8 Gbps | 928 Kops | small / neutral |
-| `governor=performance` (via tuned) | 12.5 µs | 12.8 Gbps | 928 Kops | small / neutral |
-| THP=never (`echo never > /sys/kernel/mm/transparent_hugepage/enabled`) | 12.5 µs | 12.8 Gbps | 928 Kops | none measurable |
-| `kernel.bpf_stats_enabled=0` | 12.5 µs | 12.8 Gbps | 928 Kops | none measurable |
-| `kernel.numa_balancing=0` | 12.5 µs | 12.8 Gbps | 928 Kops | none measurable |
-| `ksm/run=0` | 12.5 µs | 12.8 Gbps | 928 Kops | none measurable |
-| `intel_pstate/no_turbo=1` (Turbo off) | **11.29 µs** ⬇ | 11.98 Gbps ⬇ | **568 Kops** ⬇ 39% | **REVERTED** |
-| `ethtool -K gro off` (on top of above) | n/a | n/a | already at 568 | n/a — see below |
-| `ethtool -K tso off` (on top) | n/a | n/a | n/a | n/a — see below |
-| **Reverted Turbo + GRO + TSO, kept all others** | 12.51–12.55 µs | 12.79 Gbps | 928 Kops | final state |
-| `taskset -c 0-9 ./cp_node ...` (process-level, app threads to physical cores 0-9) | 12.5 µs | 12.8 Gbps | 928 Kops | no effect — mk pins app threads internally |
-| `ethtool -G ens1f1np1 rx 4096 tx 4096` (bigger NIC ring buffers) | 12.5 µs | 12.8 Gbps | 928 Kops | no effect — bursts already absorbed |
-| 2M hugepages for AF_XDP UMEM (THP+madvise / explicit hugepage reservation) | 12.5 µs | 12.8 Gbps | 928 Kops | no effect — mk sets up hugepages internally |
+| Change applied (cumulative)                                                       | Metric 1 P50 (32B) | Metric 3 Gbps (500KB) | Metric 5 Kops (32B) | Verdict                                     |
+| --------------------------------------------------------------------------------- | -----------------: | --------------------: | ------------------: | ------------------------------------------- |
+| **Baseline (before any of this work)**                                            |           12.59 µs |            12.78 Gbps |            927 Kops | reference                                   |
+| `irqbalance` disabled                                                             |            12.5 µs |             12.8 Gbps |            928 Kops | small / neutral                             |
+| `governor=performance` (via tuned)                                                |            12.5 µs |             12.8 Gbps |            928 Kops | small / neutral                             |
+| THP=never (`echo never > /sys/kernel/mm/transparent_hugepage/enabled`)            |            12.5 µs |             12.8 Gbps |            928 Kops | none measurable                             |
+| `kernel.bpf_stats_enabled=0`                                                      |            12.5 µs |             12.8 Gbps |            928 Kops | none measurable                             |
+| `kernel.numa_balancing=0`                                                         |            12.5 µs |             12.8 Gbps |            928 Kops | none measurable                             |
+| `ksm/run=0`                                                                       |            12.5 µs |             12.8 Gbps |            928 Kops | none measurable                             |
+| `intel_pstate/no_turbo=1` (Turbo off)                                             |     **11.29 µs** ⬇ |          11.98 Gbps ⬇ |  **568 Kops** ⬇ 39% | **REVERTED**                                |
+| `ethtool -K gro off` (on top of above)                                            |                n/a |                   n/a |      already at 568 | n/a — see below                             |
+| `ethtool -K tso off` (on top)                                                     |                n/a |                   n/a |                 n/a | n/a — see below                             |
+| **Reverted Turbo + GRO + TSO, kept all others**                                   |     12.51–12.55 µs |            12.79 Gbps |            928 Kops | final state                                 |
+| `taskset -c 0-9 ./cp_node ...` (process-level, app threads to physical cores 0-9) |            12.5 µs |             12.8 Gbps |            928 Kops | no effect — mk pins app threads internally  |
+| `ethtool -G ens1f1np1 rx 4096 tx 4096` (bigger NIC ring buffers)                  |            12.5 µs |             12.8 Gbps |            928 Kops | no effect — bursts already absorbed         |
+| 2M hugepages for AF_XDP UMEM (THP+madvise / explicit hugepage reservation)        |            12.5 µs |             12.8 Gbps |            928 Kops | no effect — mk sets up hugepages internally |
 
 (Cells with `⬇` are statistically significant regressions. Other rows
 are within run-to-run noise of ±0.1 µs / ±0.1 Gbps / ±30 Kops.)
@@ -1207,12 +1207,12 @@ sessions that were tried, found to be no-ops or harmful, and reverted.
 
 These caused measurable harm and were rolled back:
 
-| Tweak | Effect | Reverted in |
-|---|---|---|
-| `ethtool -K gro off` | metric 5: 927 → 568 Kops (39% ↓) | runbook table line 945 |
-| `ethtool -K tso off` | part of the same "disable everything" anti-pattern | runbook table line 946 |
-| `intel_pstate/no_turbo=1` | metric 5: 927 → 568 Kops (39% ↓) | runbook table line 944 |
-| `--queues N` on `cp_node client` | 1045 → 86 Kops (12× ↓) | AGENTS.md "What NOT to do" |
+| Tweak                            | Effect                                             | Reverted in                |
+| -------------------------------- | -------------------------------------------------- | -------------------------- |
+| `ethtool -K gro off`             | metric 5: 927 → 568 Kops (39% ↓)                   | runbook table line 945     |
+| `ethtool -K tso off`             | part of the same "disable everything" anti-pattern | runbook table line 946     |
+| `intel_pstate/no_turbo=1`        | metric 5: 927 → 568 Kops (39% ↓)                   | runbook table line 944     |
+| `--queues N` on `cp_node client` | 1045 → 86 Kops (12× ↓)                             | AGENTS.md "What NOT to do" |
 
 ### Obsolete workarounds (pre-HT-on, all reverted)
 
@@ -1221,14 +1221,14 @@ internal pin silently failed, and `control_loop` roamed. The
 workarounds below were tried, then obsoleted by enabling HT-on
 in commit 64502bf:
 
-| Tweak | Status | Replaced by |
-|---|---|---|
-| `taskset -c 9 ./micro_kernel` (manual pin) | obsolete | `CP_CPU=19` internal pin works with HT-on |
-| `taskset -c 0-7 ./cp_node server` | obsolete | no taskset needed (mk pins app threads internally per runbook table line 948) |
-| `-q 10` for micro_kernel | obsolete | default 20 queues (matches NIC combined) |
-| `02-irq-affinity.yml` (manual queue + IRQ pin) | removed | queue pinning proven pointless for metric 5 |
-| `02-disable-smt-mitigations.yml` (adds `nosmt`) | renamed | `02-tune-boot-params.yml` (now enables HT) |
-| VLAN interface MTU (10.0.1.x range) | removed | not relevant to our setup |
+| Tweak                                           | Status   | Replaced by                                                                   |
+| ----------------------------------------------- | -------- | ----------------------------------------------------------------------------- |
+| `taskset -c 9 ./micro_kernel` (manual pin)      | obsolete | `CP_CPU=19` internal pin works with HT-on                                     |
+| `taskset -c 0-7 ./cp_node server`               | obsolete | no taskset needed (mk pins app threads internally per runbook table line 948) |
+| `-q 10` for micro_kernel                        | obsolete | default 20 queues (matches NIC combined)                                      |
+| `02-irq-affinity.yml` (manual queue + IRQ pin)  | removed  | queue pinning proven pointless for metric 5                                   |
+| `02-disable-smt-mitigations.yml` (adds `nosmt`) | renamed  | `02-tune-boot-params.yml` (now enables HT)                                    |
+| VLAN interface MTU (10.0.1.x range)             | removed  | not relevant to our setup                                                     |
 
 ### Earlier runbook/AGENTS.md mistakes (already corrected in commit history)
 
