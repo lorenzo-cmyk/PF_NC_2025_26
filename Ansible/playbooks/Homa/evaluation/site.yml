@@ -1,0 +1,5 @@
+---
+- name: Homa full evaluation prep
+  import_playbook: 01-network-prep.yml
+- import_playbook: 03-mtu.yml
+- import_playbook: 04-verify-network.yml

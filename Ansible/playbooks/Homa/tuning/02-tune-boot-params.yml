@@ -1,5 +1,5 @@
 ---
-- name: eTran node tuning — boot parameters (HT on, mitigations, C-states, ASPM)
+- name: Homa node tuning — boot parameters (HT on, mitigations, C-states, ASPM)
   hosts: all
   become: true
   tasks:

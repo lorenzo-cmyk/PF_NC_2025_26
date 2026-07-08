@@ -5,18 +5,31 @@
     homa_num_nodes: "{{ groups['all'] | length }}"
     homa_first_node: 1
   tasks:
+    - name: Check if Homa was already built
+      ansible.builtin.stat:
+        path: /local/HomaModule/.homa-built
+      register: homa_built
+
     - name: Build the Homa kernel module and utilities
       ansible.builtin.shell:
-        cmd: make all && make -C util
+        cmd: make all && make -C util && touch /local/HomaModule/.homa-built
         chdir: /local/HomaModule
       become: true
       become_user: "{{ ansible_user }}"
+      when: not homa_built.stat.exists
+
+    - name: Check if Homa module is already loaded
+      ansible.builtin.shell:
+        cmd: lsmod | grep -q '^homa' && echo "loaded" || echo "not_loaded"
+      register: homa_loaded
+      changed_when: false
 
     - name: Load the Homa kernel module
       become: true
       ansible.builtin.command:
         cmd: insmod homa.ko
         chdir: /local/HomaModule
+      when: homa_loaded.stdout == "not_loaded"
       register: homa_insmod
       failed_when: homa_insmod.rc != 0 and 'File exists' not in homa_insmod.stderr
       changed_when: homa_insmod.rc == 0

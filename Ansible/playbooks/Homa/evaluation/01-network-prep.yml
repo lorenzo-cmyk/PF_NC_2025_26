@@ -1,4 +1,15 @@
----
+- name: Homa evaluation — enable IP forwarding (persistent)
+  hosts: all
+  become: true
+  tasks:
+    - name: Enable net.ipv4.ip_forward
+      ansible.builtin.sysctl:
+        name: net.ipv4.ip_forward
+        value: "1"
+        sysctl_set: true
+        state: present
+        reload: true
+
 - name: Homa evaluation — gather interface facts
   hosts: all
   become: true
@@ -124,7 +135,6 @@
       changed_when: false
       failed_when: false
 
-
 - name: Homa evaluation — enable segmentation offload
   hosts: all
   become: true
@@ -159,16 +169,10 @@
   become: true
   gather_facts: false
   tasks:
-    - name: Remove existing root qdisc on ens1f1np1
+    - name: Ensure homa qdisc is present on ens1f1np1
       ansible.builtin.command:
-        cmd: tc qdisc del dev ens1f1np1 root
+        cmd: "tc qdisc replace dev ens1f1np1 root handle 1: homa"
       changed_when: false
-      failed_when: false
-
-    - name: Add homa qdisc on ens1f1np1
-      ansible.builtin.command:
-        cmd: "tc qdisc add dev ens1f1np1 root handle 1: homa"
-      changed_when: true
 
     - name: Verify homa qdisc
       ansible.builtin.command:

@@ -4,11 +4,16 @@
   tasks:
     - name: Copy verified kernel .config to build tree
       ansible.builtin.copy:
-        src: /Users/pierluigigrossi/Documents/PF_NC_REBORN/Ansible/files/kernel-config
+        src: /home/lorenzo/repos/PF_NC_REBORN/Ansible/files/kernel-config
         dest: /local/linux/.config
         owner: "{{ ansible_user }}"
         mode: "0644"
       become: true
+
+    - name: Check if kernel is already compiled
+      ansible.builtin.stat:
+        path: /local/linux/vmlinux
+      register: kernel_compiled
 
     - name: Compile kernel (async, may take a while)
       ansible.builtin.shell:
@@ -18,21 +23,40 @@
       become_user: "{{ ansible_user }}"
       async: 7200
       poll: 30
+      when: not kernel_compiled.stat.exists
+
+    - name: Check if kernel modules are installed
+      ansible.builtin.stat:
+        path: /lib/modules/6.17.8/modules.dep
+      register: modules_installed
 
     - name: Install kernel modules
       become: true
       ansible.builtin.shell:
         cmd: make modules_install -j$(nproc)
         chdir: /local/linux
+      when: not modules_installed.stat.exists
+
+    - name: Check if kernel is installed
+      ansible.builtin.stat:
+        path: /boot/vmlinuz-6.17.8
+      register: kernel_installed
 
     - name: Install kernel
       become: true
       ansible.builtin.shell:
         cmd: make install -j$(nproc)
         chdir: /local/linux
+      when: not kernel_installed.stat.exists
+
+    - name: Check if kernel headers are installed
+      ansible.builtin.stat:
+        path: /local/linux/.homa-headers-installed
+      register: headers_installed
 
     - name: Install kernel headers
       become: true
       ansible.builtin.shell:
-        cmd: make headers_install INSTALL_HDR_PATH=/usr
+        cmd: make headers_install INSTALL_HDR_PATH=/usr && touch /local/linux/.homa-headers-installed
         chdir: /local/linux
+      when: not headers_installed.stat.exists

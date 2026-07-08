@@ -1,8 +1,7 @@
 ---
-- name: HOME node setup — clone source repositories
+- name: Homa node setup — clone source repositories
   hosts: all
   tasks:
-
     - name: Create /local owned by the ansible user
       become: true
       ansible.builtin.file:
@@ -11,7 +10,10 @@
         owner: "{{ ansible_user }}"
         mode: "0755"
 
-
+    - name: Check if Linux kernel source is already cloned
+      ansible.builtin.stat:
+        path: /local/linux/.git
+      register: linux_repo
 
     - name: Clone vanilla Linux kernel source (v6.17.8)
       ansible.builtin.git:
@@ -21,6 +23,12 @@
         depth: 1
       become: true
       become_user: "{{ ansible_user }}"
+      when: not linux_repo.stat.exists
+
+    - name: Check if HomaModule is already cloned
+      ansible.builtin.stat:
+        path: /local/HomaModule/.git
+      register: homamodule_repo
 
     - name: Clone HomaModule (tracks kernel 6.17.8)
       ansible.builtin.git:
@@ -29,5 +37,4 @@
         version: main
       become: true
       become_user: "{{ ansible_user }}"
-
-
+      when: not homamodule_repo.stat.exists

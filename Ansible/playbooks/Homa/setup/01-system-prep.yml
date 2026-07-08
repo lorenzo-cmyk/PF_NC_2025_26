@@ -32,10 +32,16 @@
       - pkg-config
       - screen
   tasks:
+    - name: Check if system preparation already done
+      ansible.builtin.stat:
+        path: /local/.homa-system-prep-done
+      register: system_prep_done
+
     - name: Update apt package cache
       ansible.builtin.apt:
         update_cache: true
         cache_valid_time: 3600
+      when: not system_prep_done.stat.exists
 
     - name: Full system upgrade (non-interactive)
       ansible.builtin.apt:
@@ -43,26 +49,41 @@
         dpkg_options: "{{ dpkg_options }}"
       environment:
         DEBIAN_FRONTEND: noninteractive
+      when: not system_prep_done.stat.exists
 
     - name: Autoremove orphaned packages
       ansible.builtin.apt:
         autoremove: true
+      when: not system_prep_done.stat.exists
 
     - name: Clean apt package cache
       ansible.builtin.apt:
         autoclean: true
+      when: not system_prep_done.stat.exists
 
     - name: Install build dependencies
       ansible.builtin.apt:
         name: "{{ deps }}"
         state: present
+      when: not system_prep_done.stat.exists
 
     - name: Get running kernel version
       ansible.builtin.command: uname -r
       register: running_kernel
       changed_when: false
+      when: not system_prep_done.stat.exists
 
     - name: Install matching kernel headers for the running kernel
       ansible.builtin.apt:
         name: "linux-headers-{{ running_kernel.stdout }}"
         state: present
+      when: not system_prep_done.stat.exists
+
+    - name: Mark system preparation as done
+      ansible.builtin.file:
+        path: /local/.homa-system-prep-done
+        state: touch
+        owner: "{{ ansible_user }}"
+        mode: "0644"
+      become: true
+      when: not system_prep_done.stat.exists
