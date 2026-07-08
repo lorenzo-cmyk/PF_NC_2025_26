@@ -449,6 +449,8 @@ ssh node0 "sudo screen -S dctcp_server -X hardcopy /tmp/srv.log; \
   tail latency for 7:1 32B RPC rate, while Homa's grant-based flow control keeps
   tail latency tight (~1.4 ms P99 at similar loads).
 - **DCTCP streaming throughput vs eTran TCP**: DCTCP (plain kernel TCP) achieves
-  ~2.8 Gbps (1KB) and ~4.6 Gbps (2KB), versus eTran's AF_XDP-accelerated TCP at
-  7.95 Gbps and 11.79 Gbps — a 2.6-2.8× gap from kernel TCP stack overhead.
+  ~1.8-2.8 Gbps (1KB, varies with switch ECN) and ~1.8-4.6 Gbps (2KB), versus
+  eTran's AF_XDP-accelerated TCP at ~7.2 Gbps (1KB) and ~12.3 Gbps (2KB) —
+  a ~2.6-3.96× gap from kernel TCP stack overhead. DCTCP's exact value depends
+  on switch ECN marking state, making single-point ratios unreliable.
 - Runbook: `DCTCP/Benchmark_Runbook.md` for exact per-metric commands and results.

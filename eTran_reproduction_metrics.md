@@ -77,7 +77,7 @@ Values represent **thousands of CPU cycles (kcycles)** consumed per request by e
 | **Memory Mgmt** | 0.05 | | 0.32 | | 0.06 | | 1.04 | |
 | **Scheduling** | 0.25 | | 1.19 | | 0.18 | | 1.02 | |
 | **Other** | 0.21 | | 1.82 | | 0.38 | | 1.41 | |
-| **TOTAL (kcycles)** | **4.37** | **~2.9** (client-side) | **12.51** | **~7.4** (client-side, 2026-07-08, needs server-side perf) | **5.48** | **~1357** (AF_XDP busy-poll) | **17.43** | — |
+| **TOTAL (kcycles)** | **4.37** | **~2.93** (server-side, 2026-07-08) | **12.51** | **~7.4** (client-side, 2026-07-08) | **5.48** | **~1357** (AF_XDP busy-poll) | **17.43** | — |
 
 ---
 

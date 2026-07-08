@@ -22,9 +22,9 @@
 | 10 | RTT P50 shortest-10% W5 | **14530 µs** (eTran raw) | 3.9× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
 | 11 | RTT P99 shortest-10% W4 | **12604 µs** (eTran raw) | 4.3× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
 | 12 | RTT P99 shortest-10% W5 | **48026 µs** (eTran raw) | 2.9× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
-| 13 | TCP 1KB throughput | **~7.95 Gbps**, ~970 Kops (single-threaded, default 20 queues) | 4.8× Linux | — | **~2.84×** (1×1 setup; needs #13 redo for proper 5×5 comparison). DCTCP baseline: 2.8 Gbps |
-| 14 | TCP 2KB throughput | **~11.79 Gbps**, ~719 Kops (single-threaded, default 20 queues) | 0.87× TAS | — | Raw number captured; ratio needs TAS baseline |
-| 15 | TCP 1K persistent conns, 64B | **~1129 Kops peak / ~655 K steady aggregate** (10-thr server, 5 clients × 200 conns, default 20 queues) | 2.26× Linux | — | **~2.8×** (exceeds expected 2.26×). DCTCP baseline: ~0.234 Mops (no drops). eTran drops after ~9s |
+| 13 | TCP 1KB throughput | **~7.19 Gbps**, ~878 Kops (1×1 × 64, 2026-07-08, def. 20 queues); **~12.1 Gbps / 1474 Kops** (1×5); **~7.55 Gbps / 922 Kops** (5×5) | 4.8× Linux | — | **~3.96×** vs DCTCP (paper: 4.8×). 5×5 × 64 stable, no drops. DCTCP varies with switch ECN (1.3-2.8 Gbps) |
+| 14 | TCP 2KB throughput | **~12.29 Gbps**, ~750 Kops (1×1 × 64, 2026-07-08, def. 20 queues) | 0.87× TAS | — | Ratio needs TAS baseline; DCTCP baseline varies (1.8-4.6 Gbps) with switch ECN |
+| 15 | TCP 1K persistent conns, 64B | **~1129 Kops peak / ~655 K steady aggregate** (10-thr server, 5 clients × 200 conns, default 20 queues) | 2.26× Linux | — | **~2.8×** (exceeds expected 2.26×). DCTCP baseline: ~0.234 Mops (no drops). eTran drops no longer observed post-BPF patch |
 | 18 | TCP KV throughput | **~0.73 Mops steady aggregate** (5 clients, 4 threads, 10 conns, 32 pending, default 20 queues) | ~2.6× Linux | — | DCTCP baseline: ~0.278 Mops. Ratio 2.61× within paper's 2.4-4.8× range. `--pending 32` changed from `--pending 16` per paper spec; no throughput difference observed |
 | 19 | TCP KV P50 latency | **14 µs** (2026-07-06, def. 20 queues) | 17.2 µs | **122%** | Beats paper target. DCTCP baseline: 17 µs idle, 36 µs at 320 in-flight (5×1t×4c×16p). Paper's 64 µs Linux-TCP requires switch ECN marking — not reproducible without switch config |
 | 20 | TCP KV P99 latency | **16 µs** (2026-07-06, def. 20 queues) | 27.5 µs | **172%** | Beats paper target. DCTCP baseline: 24 µs idle; same switch ECN caveat |
