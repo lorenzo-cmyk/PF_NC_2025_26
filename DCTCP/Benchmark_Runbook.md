@@ -45,7 +45,7 @@ Hardware: CloudLab xl170, single-socket 10-core E5-2640v4, Mellanox ConnectX-4 L
   BPF map contention.
 - **TCP streaming throughput** (metrics 7-8): Using the same `epoll_client` binary
   as eTran TCP metrics, DCTCP achieves ~1.8-2.8 Gbps (1KB, varies with switch ECN)
-  and ~1.8-4.6 Gbps (2KB). This is **~2.6-3.96× lower** than eTran's AF_XDP-accelerated
+  and ~1.8-4.6 Gbps (2KB). This is **~2.6-3.95× lower** than eTran's AF_XDP-accelerated
   TCP (~7.2 Gbps / ~12.3 Gbps), confirming that eTran's AF_XDP data-path bypass
   provides significant throughput gains for small-to-medium messages.
   softirq processing, and syscall overhead are the bottleneck.
@@ -323,7 +323,7 @@ Per-client steady: ~55.7, ~55.5, ~55.5, ~55.7, ~55.6 Kops.
 Per-client latency under load: P50≈717 µs, P90≈760 µs, P99≈862 µs.
 
 For comparison: eTran TCP (AF_XDP) KV throughput = **~0.73 Mops** —
-ratio **~2.61×** (within paper's 2.4-4.8× range).
+ratio **~2.62×** (within paper's 2.4-4.8× range).
 
 > **`--pending 32`** matches the paper spec (§6.4: "each uses 32 parallel GETs").
 > The eTran TCP run previously used `--pending 16`; changing to 32 had no
@@ -394,10 +394,11 @@ drops during the 20s measurement window. Per-client steady: ~46.8 Kops each.
 For comparison: eTran TCP (AF_XDP) = **~655 Kops steady aggregate**.
 Ratio eTran/DCTCP ≈ **2.8×**.
 
-> Unlike eTran TCP metric 15 (which suffers from microkernel TCP connection drops
-> after ~9s at this load), the DCTCP baseline ran cleanly for the full 20s window.
+> Unlike eTran TCP metric 15 (which could drop connections after ~9s in older code —
+> no longer reproducible post-BPF XDP_EGRESS patch), the DCTCP baseline ran
+> cleanly for the full 20s window.
 > The 2.8× ratio is consistent with the eTran TCP throughput advantage seen in
-> other metrics (metric 13: ~2.8× at 1KB, metric 18: ~2.6× at KV).
+> other metrics (metric 13: ~3.95× at 1KB, metric 18: ~2.62× at KV).
 ## Quick-Reference: cp_node Arguments for TCP
 
 | Flag | Default | Description |

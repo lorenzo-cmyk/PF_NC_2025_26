@@ -22,10 +22,10 @@
 | 10 | RTT P50 shortest-10% W5 | **14530 µs** (eTran raw) | 3.9× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
 | 11 | RTT P99 shortest-10% W4 | **12604 µs** (eTran raw) | 4.3× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
 | 12 | RTT P99 shortest-10% W5 | **48026 µs** (eTran raw) | 2.9× vs Linux-Homa | — | Needs Linux baseline for slowdown ratio |
-| 13 | TCP 1KB throughput | **~7.19 Gbps**, ~878 Kops (1×1 × 64, 2026-07-08, def. 20 queues); **~12.1 Gbps / 1474 Kops** (1×5); **~7.55 Gbps / 922 Kops** (5×5) | 4.8× Linux | — | **~3.96×** vs DCTCP (paper: 4.8×). 5×5 × 64 stable, no drops. DCTCP varies with switch ECN (1.3-2.8 Gbps) |
+| 13 | TCP 1KB throughput | **~7.19 Gbps**, ~878 Kops (1×1 × 64, 2026-07-08, def. 20 queues); **~12.1 Gbps / 1474 Kops** (1×5); **~7.55 Gbps / 922 Kops** (5×5) | 4.8× Linux | — | **~3.95×** vs DCTCP (paper: 4.8×). 5×5 × 64 stable, no drops. DCTCP varies with switch ECN (1.3-2.8 Gbps) |
 | 14 | TCP 2KB throughput | **~12.29 Gbps**, ~750 Kops (1×1 × 64, 2026-07-08, def. 20 queues) | 0.87× TAS | — | Ratio needs TAS baseline; DCTCP baseline varies (1.8-4.6 Gbps) with switch ECN |
 | 15 | TCP 1K persistent conns, 64B | **~1129 Kops peak / ~655 K steady aggregate** (10-thr server, 5 clients × 200 conns, default 20 queues) | 2.26× Linux | — | **~2.8×** (exceeds expected 2.26×). DCTCP baseline: ~0.234 Mops (no drops). eTran drops no longer observed post-BPF patch |
-| 18 | TCP KV throughput | **~0.73 Mops steady aggregate** (5 clients, 4 threads, 10 conns, 32 pending, default 20 queues) | ~2.6× Linux | — | DCTCP baseline: ~0.278 Mops. Ratio 2.61× within paper's 2.4-4.8× range. `--pending 32` changed from `--pending 16` per paper spec; no throughput difference observed |
+| 18 | TCP KV throughput | **~0.73 Mops steady aggregate** (5 clients, 4 threads, 10 conns, 32 pending, default 20 queues) | ~2.6× Linux | — | DCTCP baseline: ~0.278 Mops. Ratio 2.62× within paper's 2.4-4.8× range. `--pending 32` changed from `--pending 16` per paper spec; no throughput difference observed |
 | 19 | TCP KV P50 latency | **14 µs** (2026-07-06, def. 20 queues) | 17.2 µs | **122%** | Beats paper target. DCTCP baseline: 17 µs idle, 36 µs at 320 in-flight (5×1t×4c×16p). Paper's 64 µs Linux-TCP requires switch ECN marking — not reproducible without switch config |
 | 20 | TCP KV P99 latency | **16 µs** (2026-07-06, def. 20 queues) | 27.5 µs | **172%** | Beats paper target. DCTCP baseline: 24 µs idle; same switch ECN caveat |
 | 21 | TCP CPU cycles/req | **~2.93 kcycles** (2026-07-08, server-side, ~884 Kops, 31.1B cycles) | 4.37 kcycles | — | Server-side measured; paper value under NAPI stress includes overhead we don't see |
@@ -579,7 +579,7 @@ completed cleanly) — likely resolved by the BPF XDP_EGRESS patch.
 - **No connection drops** at 1600 in-flight (contrary to the old "6400 drops" caveat).
 - Single 5-thread client saturates at **~12.1 Gbps / ~1474 Kops**.
 
-**Ratio vs DCTCP (same 1×1 × 64 config):** **~3.96×** (paper: 4.8×). Acceptable
+**Ratio vs DCTCP (same 1×1 × 64 config):** **~3.95×** (paper: 4.8×). Acceptable
 given DCTCP sensitivity to switch ECN marking state.
 
 ### 14. eTran - TCP | 2KB throughput, 64 outstanding, single-threaded | 0.87x TAS | Medium
@@ -686,7 +686,7 @@ Output: `TP: total=<mops> mops  50p=<us> 90p=<us> 95p=<us> 99p=<us> 99.9p=<us> 9
 **Result** (2026-07-08, `--pending 32`, default 20 queues): **~0.73 Mops
 steady aggregate** (5 clients). Per-client: ~150, ~149, ~146, ~142, ~140 Kops.
 Per-client latency under load: P50≈262 µs, P99≈310 µs.
-DCTCP baseline: ~0.278 Mops aggregate. Ratio: **~2.61× Linux** (within paper's 2.4-4.8×).
+DCTCP baseline: ~0.278 Mops aggregate. Ratio: **~2.62× Linux** (within paper's 2.4-4.8×).
 
 ### 19. eTran - TCP | KV P50 latency, under-loaded | 17.2 µs | 6-Node
 
@@ -1324,8 +1324,9 @@ self-contained as a reference:
       the BPF XDP_EGRESS patch (it affected TCP egress paths too, not just Homa
       grants). Metrics 13-15, 18-21 confirmed working (15, 18-21 tested). The
       "Connection is closed by microkernel" message after ~9s in `lib/socket.cc:405`
-      is a socket lifecycle issue — the microkernel closes TCP state, but the
-      benchmark produces valid data before that.
+      is **no longer reproducible with 5×5 × 64 (1600 in-flight)** — runs 20s+
+      cleanly. The earlier drop may have been specific to older code before the
+      BPF XDP_EGRESS patch was applied.
 
 11. **Multi-client Homa grant scaling** — Beyond ~200 concurrent RPCs, the Homa
     BPF grant mechanism collapses under `insert_grant_list → bpf_obj_new` memory

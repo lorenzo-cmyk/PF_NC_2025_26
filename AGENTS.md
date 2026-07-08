@@ -146,7 +146,7 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
 - Metrics 13-14: 5×5 × 64 (1600 in-flight) is **stable with no drops** post-BPF XDP_EGRESS patch.
   Optimal per-client config: 5 threads × 1 flow × 64 outstanding (`-t 5 -f 1 -o 64`).
   Single client achieves ~12.1 Gbps / 1474 Kops; 5-client aggregate drops to ~922 Kops
-  (server-side queue contention). Best eTran/DCTCP ratio: ~3.96× (paper: 4.8×).
+  (server-side queue contention). Best eTran/DCTCP ratio: ~3.95× (paper: 4.8×).
 - Metric 15: stagger clients 0.5s apart to avoid overwhelming server
 - Metrics 19-20: KV latency beats paper targets (14 vs 17.2 µs P50, 16 vs 27.5 µs P99)
 
@@ -451,6 +451,6 @@ ssh node0 "sudo screen -S dctcp_server -X hardcopy /tmp/srv.log; \
 - **DCTCP streaming throughput vs eTran TCP**: DCTCP (plain kernel TCP) achieves
   ~1.8-2.8 Gbps (1KB, varies with switch ECN) and ~1.8-4.6 Gbps (2KB), versus
   eTran's AF_XDP-accelerated TCP at ~7.2 Gbps (1KB) and ~12.3 Gbps (2KB) —
-  a ~2.6-3.96× gap from kernel TCP stack overhead. DCTCP's exact value depends
+  a ~2.6-3.95× gap from kernel TCP stack overhead. DCTCP's exact value depends
   on switch ECN marking state, making single-point ratios unreliable.
 - Runbook: `DCTCP/Benchmark_Runbook.md` for exact per-metric commands and results.
