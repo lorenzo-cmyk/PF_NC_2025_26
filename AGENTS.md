@@ -418,16 +418,16 @@ ssh node0 "sudo screen -S dctcp_server -X hardcopy /tmp/srv.log; \
 
 ## Key differences from eTran benchmarks
 
-| Aspect | eTran (Homa/TCP) | DCTCP (plain TCP) |
-|--------|-----------------|-------------------|
-| Binary | `cp_node` (eTran), `epoll_*` (TCP) | `cp_node` from HomaModule |
-| Congestion control | N/A (Homa), cubic (eTran TCP) | dctcp |
-| ECN | N/A | Required (`tcp_ecn=1`) |
-| Kernel module | eTran XDP/BPF programs | `tcp_dctcp` |
-| Micro_kernel | Required (AF_XDP control plane) | Not needed |
-| LD_PRELOAD | `libetran.so` for TCP | Not needed |
-| Server default port | 4000 (Homa), 5000 (TCP epoll) | 5000 (cp_node TCP default) |
-| Client flag | `--protocol` omitted (default homa) | `--protocol tcp` required |
+| Aspect              | eTran (Homa/TCP)                    | DCTCP (plain TCP)          |
+| ------------------- | ----------------------------------- | -------------------------- |
+| Binary              | `cp_node` (eTran), `epoll_*` (TCP)  | `cp_node` from HomaModule  |
+| Congestion control  | N/A (Homa), cubic (eTran TCP)       | dctcp                      |
+| ECN                 | N/A                                 | Required (`tcp_ecn=1`)     |
+| Kernel module       | eTran XDP/BPF programs              | `tcp_dctcp`                |
+| Micro_kernel        | Required (AF_XDP control plane)     | Not needed                 |
+| LD_PRELOAD          | `libetran.so` for TCP               | Not needed                 |
+| Server default port | 4000 (Homa), 5000 (TCP epoll)       | 5000 (cp_node TCP default) |
+| Client flag         | `--protocol` omitted (default homa) | `--protocol tcp` required  |
 
 ## Known caveats
 
