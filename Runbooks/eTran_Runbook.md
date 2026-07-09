@@ -101,12 +101,11 @@ against source code in:
 
 ## Pre-Flight Checklist
 
-1. **Microkernel** must be running on every node:
+1. **Microkernel** must be running on every node (via `screen` — persists across runs):
    ```bash
-    cd /local/eTran/eTran/micro_kernel
-    sudo ./micro_kernel -i ens1f1np1
-    ```
-    > Default 20 queues matches NIC combined=20 (check with `ethtool -l ens1f1np1`).
+   ssh nodeN "sudo screen -dmS micro_kernel bash -c 'cd /local/eTran/eTran/micro_kernel && exec ./micro_kernel -i ens1f1np1'"
+   ```
+   > Default 20 queues matches NIC combined=20 (check with `ethtool -l ens1f1np1`).
 
 2. **App binaries** live in their build subdirectories:
    ```
@@ -175,7 +174,7 @@ Verified against `homa_app/cp_node.cc` (eTran) and upstream `PlatformLab/HomaMod
 | `--ports`        | int    | `1`     | Sending threads (one per port)                                 |
 | `--server-nodes` | int    | `1`     | Number of server nodes to target                               |
 | `--server-ports` | int    | `1`     | Server ports per node                                          |
-| `--first-server` | int    | `1`     | First server node ID (`nodeN`)                                 |
+| `--first-server` | int    | `0`     | First server node ID (`nodeN`)                                 |
 | `--gbps`         | float  | `0.0`   | Target Gbps; **0 = send continuously** (closed-loop)           |
 | `--one-way`      | flag   | `false` | Server returns 100B response (not echo)                        |
 | `--id`           | int    | `-1`    | This node's ID; skip `node{id}` as target                      |

@@ -7,7 +7,7 @@
 >   for raw TCP streaming throughput (same binaries as eTran TCP metrics,
 >   running on standard kernel TCP stack instead of AF_XDP).
 >
-> Pre-flight: ensure DCTCP is configured on all nodes (see `playbooks/setup/site.yml`).
+> Pre-flight: ensure DCTCP is configured on all nodes (see `playbooks/DCTCP/setup/site.yml`).
 > Network is assumed pre-configured by eTran's evaluation playbooks (ARP, `/etc/hosts`, NIC tuning).
 >
 > DCTCP uses the **standard Linux TCP stack** with DCTCP congestion control + ECN.
@@ -63,7 +63,7 @@ Hardware: CloudLab xl170, single-socket 10-core E5-2640v4, Mellanox ConnectX-4 L
    sudo sysctl -w net.ipv4.tcp_ecn=1
    sudo sysctl -w net.ipv4.tcp_timestamps=1
    ```
-   Or via Ansible: `cd DCTCP/Ansible && .venv/bin/ansible-playbook playbooks/setup/site.yml`
+   Or via Ansible: `cd Ansible && .venv/bin/ansible-playbook playbooks/DCTCP/setup/site.yml`
 
 2. **cp_node binary** compiled on all nodes:
    ```bash
@@ -250,7 +250,7 @@ screen -dmS dctcp_epoll bash -c 'cd /local/eTran/eTran/tcp_app && \
   exec ./epoll_server -i 192.168.6.1 -b 1024'
 
 # Client (node1):
-timeout 15 stdbuf -oL ./epoll_client -i 192.168.6.1 -b 1024 -o 64 -f 1 -t 1
+timeout 15 stdbuf -oL bash -c 'cd /local/eTran/eTran/tcp_app && ./epoll_client -i 192.168.6.1 -b 1024 -o 64 -f 1 -t 1'
 ```
 
 Output: `Throughput In/Out(<gbps>/<gbps> Gbps)(<kops> Kops)`
@@ -272,7 +272,7 @@ screen -dmS dctcp_epoll bash -c 'cd /local/eTran/eTran/tcp_app && \
   exec ./epoll_server -i 192.168.6.1 -b 2048'
 
 # Client (node1):
-timeout 15 stdbuf -oL ./epoll_client -i 192.168.6.1 -b 2048 -o 64 -f 1 -t 1
+timeout 15 stdbuf -oL bash -c 'cd /local/eTran/eTran/tcp_app && ./epoll_client -i 192.168.6.1 -b 2048 -o 64 -f 1 -t 1'
 ```
 
 **Result** (2026-07-08): **~1.8-4.6 Gbps out**, ~111-283 Kops/sec (varies with switch
@@ -283,7 +283,7 @@ For comparison: eTran TCP (AF_XDP) 2KB = **~12.3 Gbps**, ~750 Kops.
 
 ```bash
 sudo perf stat -e cycles,instructions \
-  timeout 15 stdbuf -oL ./epoll_client -i 192.168.6.1 -b 1024 -o 64 -f 1 -t 1
+  timeout 15 stdbuf -oL bash -c 'cd /local/eTran/eTran/tcp_app && ./epoll_client -i 192.168.6.1 -b 1024 -o 64 -f 1 -t 1'
 ```
 
 Calculate: `cycles_per_request = total_cycles / (avg_Kops × active_seconds)`
@@ -378,10 +378,10 @@ For comparison: eTran TCP = **14 µs P50, 16 µs P99**; paper's Linux-TCP = 64.2
 
 ```bash
 # Server (1 node) — 10 threads, 64B request:
-./epoll_server -i 192.168.6.1 -b 64 -t 10
+cd /local/eTran/eTran/tcp_app && ./epoll_server -i 192.168.6.1 -b 64 -t 10
 
 # Clients (5 nodes), each — 200 connections, 4 threads, 1 outstanding:
-script -q -c 'timeout 20 ./epoll_client -i 192.168.6.1 -b 64 -f 200 -t 4 -o 1 -w 2' /dev/null
+cd /local/eTran/eTran/tcp_app && script -q -c 'timeout 20 ./epoll_client -i 192.168.6.1 -b 64 -f 200 -t 4 -o 1 -w 2' /dev/null
 ```
 
 Same binaries as eTran TCP metric 15, running without `LD_PRELOAD=libetran.so`

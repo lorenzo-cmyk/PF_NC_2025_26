@@ -5,15 +5,15 @@
 Reboot resets: ARP table, /etc/hosts, NIC coalescing, flow control, queue count, MTU.
 
 ```bash
-# All ansible-playbook commands run from eTran/Ansible/ directory:
-cd eTran/Ansible
+# All ansible-playbook commands run from Ansible/ directory:
+cd Ansible
 
 # Required after every reboot:
-.venv/bin/ansible-playbook playbooks/evaluation/01-network-prep.yml
-.venv/bin/ansible-playbook playbooks/evaluation/03-verify-network.yml
+.venv/bin/ansible-playbook playbooks/eTran/evaluation/01-network-prep.yml
+.venv/bin/ansible-playbook playbooks/eTran/evaluation/03-verify-network.yml
 
 # Optional: MTU (default 1500, skip for standard runs)
-# .venv/bin/ansible-playbook playbooks/evaluation/02-mtu.yml --extra-vars 'mtu=9000'
+# .venv/bin/ansible-playbook playbooks/eTran/evaluation/02-mtu.yml --extra-vars 'mtu=9000'
 ```
 
 ## Critical procedure for running benchmarks
@@ -297,12 +297,12 @@ wait
   table and rationale, and **do not waste time re-adding it**.
 
 ## Ansible playbook structure
-- `eTran/Ansible/playbooks/setup/` — one-time: system deps, kernel build, install eTran
-- `eTran/Ansible/playbooks/tuning/` — one-time (persists reboot): mitigations off, C-states off, ASPM off, tuned
+- `Ansible/playbooks/eTran/setup/` — one-time: system deps, kernel build, install eTran
+- `Ansible/playbooks/eTran/tuning/` — one-time (persists reboot): mitigations off, C-states off, ASPM off, tuned
   (SMT is now ON — `nosmt` removed; playbook renamed `02-tune-boot-params.yml`).
   Note: a `05-runtime-tuning.yml` was tried and removed; see the
   "System Tuning" section in the runbook.
-- `eTran/Ansible/playbooks/evaluation/` — per-session (run after EVERY reboot): ARP, hosts, NIC tuning, MTU, verify
+- `Ansible/playbooks/eTran/evaluation/` — per-session (run after EVERY reboot): ARP, hosts, NIC tuning, MTU, verify
 
 ## Ansible inventory
 - `@server` = node0, `@clients` = node1–node9
@@ -354,6 +354,8 @@ wait
 
 ---
 
+---
+
 # DCTCP Benchmark Session Notes
 
 DCTCP benchmarks measure the standard Linux TCP stack with DCTCP congestion
@@ -365,7 +367,7 @@ the kernel stack using the `cp_node` utility from
 
 ```bash
 # From repo root:
-.venv/bin/ansible-playbook DCTCP/Ansible/playbooks/setup/site.yml
+.venv/bin/ansible-playbook Ansible/playbooks/DCTCP/setup/site.yml
 ```
 
 This runs three playbooks on all nodes:
@@ -453,4 +455,4 @@ ssh node0 "sudo screen -S dctcp_server -X hardcopy /tmp/srv.log; \
   eTran's AF_XDP-accelerated TCP at ~7.2 Gbps (1KB) and ~12.3 Gbps (2KB) —
   a ~2.6-3.95× gap from kernel TCP stack overhead. DCTCP's exact value depends
   on switch ECN marking state, making single-point ratios unreliable.
-- Runbook: `DCTCP/Benchmark_Runbook.md` for exact per-metric commands and results.
+- Runbook: `Runbooks/DCTCP_Runbook.md` for exact per-metric commands and results.

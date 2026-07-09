@@ -25,7 +25,7 @@ Hardware: CloudLab xl170, single-socket 10-core E5-2640v4, Mellanox ConnectX-4 L
 | 3   | 500KB throughput, 7 clients → 1 server                                    | **~23 Gbps** server  | **12.9 Gbps**        | 23.0 Gbps            | Kernel Homa saturates link; eTran capped by XDP_GEN grant dispatch |
 | 4   | 500KB throughput, 1 client → 7 servers                                    | **~22.5 Gbps** client| **19.5 Gbps**        | 22.7 Gbps            | Kernel Homa near line rate                        |
 | 5   | 32B RPC rate, 7 clients → 1 server                                        | **~1.1 Mops** server | **~0.93 Mops**       | 2.9 Mops             | eTran 85% of kernel Homa here (AF_XDP polling overhead) |
-| 6   | 32B RPC rate, 1 client → 7 servers                                        | **~0.66 Mops** client| **~1.12 Mops**       | 3.3 Mops             | eTran 1.7× higher than kernel Homa               |
+| 6   | 32B RPC rate, 1 client → 7 servers                                        | **~0.9 Mops** client | **~1.12 Mops**       | 3.3 Mops             | eTran 1.24× higher than kernel Homa              |
 | 7   | W2 all-to-all P50/P99 (short-msg, 3.2 Gbps)                               | 94 / 9453 µs        | 109 / 1344 µs       | —                    | P99 slowdown 7.0× (within paper's 3.9-7.5×)     |
 | 8   | W3 all-to-all P50/P99 (short-msg, 14 Gbps)                                | 100 / 9511 µs       | 115 / 1428 µs       | —                    | P99 slowdown 6.7× (within paper's 3.9-7.5×)     |
 | 9   | W4 shortest-10% P50/P99 (large-msg, 20 Gbps)                              | 22 / 24 µs          | 2848 / 12604 µs     | —                    | LH much better for small msgs under mixed load   |
@@ -47,7 +47,7 @@ Hardware: CloudLab xl170, single-socket 10-core E5-2640v4, Mellanox ConnectX-4 L
   kernel Homa achieves ~1.1 Mops vs eTran's ~0.93 Mops — the kernel's multi-threaded
   accept path handles concurrent clients better, while eTran's per-app-thread
   polling incurs overhead. For 1:7 server RPC rate (metric 6), eTran wins at
-  ~1.12 Mops vs kernel Homa's ~0.66 Mops — the single-client eTran app thread
+  ~1.12 Mops vs kernel Homa's ~0.9 Mops — the single-client eTran app thread
   drives 7 server connections more efficiently than the kernel's one-thread-per-port
   model.
 - **No micro_kernel or XDP cleanup needed**: Kernel Homa runs entirely in the kernel.
@@ -284,7 +284,7 @@ timeout 30 ./cp_node client \
   --server-nodes 7
 ```
 
-**Result** (2026-07-09): Client **~660 Kops/sec** steady. RTT P50 ~360-395 µs.
+**Result** (2026-07-09): Client **~0.9 Mops/sec** steady. RTT P50 ~360-395 µs.
 Per-server load imbalanced (25-91 Kops each — typical Homa distribution).
 For comparison: eTran Homa = ~1.12 Mops; paper's Linux-Homa target = 1.8 Mops.
 
