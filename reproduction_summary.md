@@ -111,6 +111,23 @@ second (Mops).
 | eTran Homa server RPC rate (Mops) | 3.3   | ~1.12    | Significantly below (34%) |
 | Linux Homa server RPC rate (Mops) | 1.8   | 0.9      | Below (50%)               |
 
+**How to read this gap.** Both stacks miss the paper on our testbed — the
+independent kernel-Homa baseline also lands at 50-65% of its paper target.
+Part of the gap is therefore systematic (version skew, harness, peak-vs-steady
+definitions), not eTran-specific. The eTran-specific residual is best isolated
+by comparing the eTran:Linux-Homa *ratio* in the paper vs locally:
+
+| Ratio                              | Paper | Ours |
+| ---------------------------------- | ----- | ---- |
+| eTran / Linux-Homa, client RPC rate | 1.71× | 0.85× |
+| eTran / Linux-Homa, server RPC rate | 1.83× | 1.24× |
+
+The paper has eTran ~1.7-1.8× faster than kernel Homa at RPC rate; we measure
+rough parity. That ~1.5-2× residual is the real open question. Note that 32B
+messages never touch the Homa grant path (they fit in the unscheduled region),
+so the XDP_GEN grant-serialization hypothesis cannot explain this gap — the cap
+must be in the app polling loop, AF_XDP redirect, or BPF RPC-map contention.
+
 ## 5. Homa Tail Latency in Mixed Workloads (All-to-All)
 
 **What we measure:** End-to-end latency in a realistic cluster workload. Ten
@@ -123,16 +140,32 @@ report the slowdown factor, defined as Linux Homa (kernel module) latency
 divided by eTran Homa latency. A slowdown above 1.0x means eTran is faster; a
 slowdown below 1.0x means Linux Homa is faster.
 
+**Caveat — W4/W5 numbers reflect overload, not protocol behavior.** The
+offered load for W4 and W5 is 20 Gbps/node (open-loop Poisson), but our eTran
+large-message throughput peaks at ~13 Gbps (section 3). A system offered more
+than it can drain grows queues without bound, mechanically inflating
+small-message RTTs into the millisecond range. Evidence: W5 aggregate throughput
+was ~16 Kops (vs ~4000 Kops for W2), confirming the system was in congestion
+collapse rather than steady operation. Kernel Homa's W4/W5 measurements use a
+different harness (pre-started servers + piped stdin, with self-targeting
+overhead), so the comparisons are made under dissimilar conditions even before
+accounting for offered load. The slowdown factors for W2 and W3 are more
+reliable (systems are not overloaded at 3.2-14 Gbps), but harness asymmetry
+means they should be treated as indicative rather than exact. Re-measurement
+on a fresh allocation should: (a) sweep offered load below each system's
+sustainable rate with achieved-load reporting, (b) use identical harness for
+both stacks (e.g., backport `--both`/`--id` to HomaModule's cp_node).
+
 | Metric                                               | Paper Slowdown | Measured Slowdown | Match        |
 | ---------------------------------------------------- | -------------- | ----------------- | ------------ |
 | W2 P99 slowdown (short-msg dominated workload)       | 3.9x - 7.5x    | 7.0x              | Within range |
 | W3 P99 slowdown (short-msg dominated workload)       | 3.9x - 7.5x    | 6.7x              | Within range |
 | W2 P50 slowdown                                      | 1.4x - 3.6x    | 0.86x             | Below range  |
 | W3 P50 slowdown                                      | 1.4x - 3.6x    | 0.87x             | Below range  |
-| W4 P50 slowdown (shortest 10% of RPCs, 20 Gbps load) | 4.1x           | 0.008x            | Below range  |
-| W5 P50 slowdown (shortest 10% of RPCs, 20 Gbps load) | 3.9x           | 0.004x            | Below range  |
-| W4 P99 slowdown (shortest 10% of RPCs, 20 Gbps load) | 4.3x           | 0.002x            | Below range  |
-| W5 P99 slowdown (shortest 10% of RPCs, 20 Gbps load) | 2.9x           | 0.002x            | Below range  |
+| W4 P50 slowdown (shortest 10% of RPCs, 20 Gbps load) | 4.1x           | 0.008x            | Invalid (overload artifact) |
+| W5 P50 slowdown (shortest 10% of RPCs, 20 Gbps load) | 3.9x           | 0.004x            | Invalid (overload artifact) |
+| W4 P99 slowdown (shortest 10% of RPCs, 20 Gbps load) | 4.3x           | 0.002x            | Invalid (overload artifact) |
+| W5 P99 slowdown (shortest 10% of RPCs, 20 Gbps load) | 2.9x           | 0.002x            | Invalid (overload artifact) |
 
 ## 6. TCP Throughput (1KB and 2KB Messages)
 
@@ -186,8 +219,16 @@ client machines each use 4 threads, 10 connections, and 32 parallel requests.
 For latency, a single client uses 1 thread, 1 connection, and 1 request at a
 time (under-loaded server). Values in Mops (throughput) and microseconds
 (latency). eTran accelerates TCP via AF_XDP. DCTCP runs on the standard kernel
-stack. Note: our DCTCP latency values (36 us P50) are lower than the paper's
-(64.2 us P50).
+stack. Note: our DCTCP latency values (36 us P50 at 320 in-flight, 17 us idle)
+are lower than the paper's (64.2 us P50). Switch ECN marking IS enabled on our
+SN2410 (corrected 2026-07-18 — earlier docs stated otherwise), so the
+discrepancy is not due to the absence of marking. The exact threshold on our
+switch has not yet been recorded; a higher marking threshold than the paper's
+deduced ~70 KB would allow deeper queuing before marking triggers, creating a
+difference in steady-state queue occupancy under load. Under idle conditions
+(1 × 1 × 1), no queue forms regardless of marking threshold, so the paper's
+idle 64.2 µs P50 likely reflects base-latency or kernel-path differences on
+their testbed rather than a protocol effect.
 
 | Metric                     | Paper                                  | Measured              | Match        |
 | -------------------------- | -------------------------------------- | --------------------- | ------------ |
@@ -209,6 +250,14 @@ raw measured value is 1357 kcycles, dominated by idle polling. Subtracting the
 busy-poll idle cycles yields an estimated active processing cost of roughly 5
 kcycles per request, matching the paper's 5.48 kcycles target. Linux Homa
 measured with the kernel module at approximately 279,000 requests per second.
+
+**Methodology note:** these measurements use `perf stat -p` on the benchmark
+process only, capturing user + kernel cycles for that single process. The
+paper's Table 5 values are system-wide under a single-NAPI-context stress
+(including softirq, NIC driver kernel work, and — for eTran — the microkernel
+process). Our process-scoped numbers therefore underestimate the paper's
+system-wide accounting, so "Below paper" in the eTran TCP and DCTCP TCP rows
+should not be interpreted as outperforming the paper — the methodologies differ.
 
 | Metric                           | Paper | Measured | Match           |
 | -------------------------------- | ----- | -------- | --------------- |
