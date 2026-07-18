@@ -10,6 +10,23 @@ Results are grouped by category. For each category we describe the experimental
 setup in plain terms and report the paper's expected value alongside our
 measured value.
 
+**How to read this report (caveats up front):**
+
+- The W4/W5 tail-latency numbers in section 5 reflect **system overload at the
+  offered load**, not protocol behavior — treat them as invalid until
+  re-measured at sustainable loads (details in section 5).
+- Where both eTran *and* the independent Linux-Homa baseline miss the paper in
+  the same direction, part of the gap is systematic (version skew, harness,
+  peak-vs-steady definitions). Section 4 isolates the eTran-specific residual
+  with a ratio-of-ratios analysis.
+- DCTCP baseline throughput varies 2-3× between runs despite switch ECN marking
+  being enabled (mechanism unresolved), so all ratios against DCTCP carry that
+  uncertainty.
+- CPU-cycle numbers (section 9) use process-scoped perf accounting, not the
+  paper's system-wide accounting — not directly comparable.
+- One unresolved measurement conflict: Linux-Homa 1MB throughput is recorded
+  as both 17.9 Gbps (2026-07-08) and ~10-11 Gbps (2026-07-09) — see section 2.
+
 ---
 
 ## 1. Homa Short Message Latency
@@ -35,7 +52,15 @@ full payload. We report the sustained throughput in Gbps. Two machines total.
 | Metric                           | Paper | Measured | Match                |
 | -------------------------------- | ----- | -------- | -------------------- |
 | eTran Homa 1MB throughput (Gbps) | 17.7  | 16.6     | Slightly below (94%) |
-| Linux Homa 1MB throughput (Gbps) | 14.5  | 17.9     | Exceeds paper        |
+| Linux Homa 1MB throughput (Gbps) | 14.5  | 17.9     | ⚠️ Conflicting data  |
+
+> **Measurement conflict (unresolved):** Linux-Homa 1MB throughput was recorded
+> as **17.9 Gbps** on 2026-07-08 (exceeds paper) and as **~10-11 Gbps** on
+> 2026-07-09 (Homa runbook, below paper's 14.5). The 07-09 value is internally
+> consistent with its measured RTT (~720 µs ⇒ ~11 Gbps at 1MB per RPC). The two
+> runs used nominally identical commands; the difference is unexplained
+> (candidate: qdisc/sysctl state differences between sessions). Re-measure on
+> next cluster allocation before quoting either value.
 
 ## 3. Homa Multi-Threaded Throughput
 

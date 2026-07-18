@@ -26,7 +26,7 @@
 | 14  | TCP 2KB throughput             | **~12.29 Gbps**, ~750 Kops (1×1 × 64, 2026-07-08, def. 20 queues)                                                                   | 0.87× TAS                  | —        | Ratio needs TAS baseline; DCTCP baseline varies (1.8-4.6 Gbps) with switch ECN                                                                                                                                                                        |
 | 15  | TCP 1K persistent conns, 64B   | **~1129 Kops peak / ~655 K steady aggregate** (10-thr server, 5 clients × 200 conns, default 20 queues)                             | 2.26× Linux                | —        | **~2.8×** (exceeds expected 2.26×). DCTCP baseline: ~0.234 Mops (no drops). eTran drops no longer observed post-BPF patch                                                                                                                             |
 | 18  | TCP KV throughput              | **~0.73 Mops steady aggregate** (5 clients, 4 threads, 10 conns, 32 pending, default 20 queues)                                     | ~2.6× Linux                | —        | DCTCP baseline: ~0.278 Mops. Ratio 2.62× within paper's 2.4-4.8× range. `--pending 32` changed from `--pending 16` per paper spec; no throughput difference observed                                                                                  |
-| 19  | TCP KV P50 latency             | **14 µs** (2026-07-06, def. 20 queues)                                                                                              | 17.2 µs                    | **122%** | Beats paper target. DCTCP baseline: 17 µs idle, 36 µs at 320 in-flight (5×1t×4c×16p). Paper's 64 µs Linux-TCP requires switch ECN marking — not reproducible without switch config                                                                    |
+| 19  | TCP KV P50 latency             | **14 µs** (2026-07-06, def. 20 queues)                                                                                              | 17.2 µs                    | **122%** | Beats paper target. DCTCP baseline: 17 µs idle, 36 µs at 320 in-flight (5×1t×4c×16p). Paper's higher 64 µs Linux-TCP P50 most likely reflects testbed base-latency differences — switch ECN marking IS enabled on our SN2410 (corrected 2026-07-18) and cannot affect the queue-free under-loaded test anyway |
 | 20  | TCP KV P99 latency             | **16 µs** (2026-07-06, def. 20 queues)                                                                                              | 27.5 µs                    | **172%** | Beats paper target. DCTCP baseline: 24 µs idle; same switch ECN caveat                                                                                                                                                                                |
 | 21  | TCP CPU cycles/req             | **~2.93 kcycles** (2026-07-08, server-side, ~884 Kops, 31.1B cycles)                                                                | 4.37 kcycles               | —        | Server-side measured; paper value under NAPI stress includes overhead we don't see                                                                                                                                                                    |
 | 22  | Homa CPU cycles/req            | **~1357 kcycles** (2026-07-06, 50.9B cycles, 1MB)                                                                                   | 5.48 kcycles               | —        | AF_XDP busy-poll inflation (99.6% idle); active ~5 kcycles matches paper                                                                                                                                                                              |
@@ -579,7 +579,8 @@ completed cleanly) — likely resolved by the BPF XDP_EGRESS patch.
 - Single 5-thread client saturates at **~12.1 Gbps / ~1474 Kops**.
 
 **Ratio vs DCTCP (same 1×1 × 64 config):** **~3.95×** (paper: 4.8×). Acceptable
-given DCTCP sensitivity to switch ECN marking state.
+given the unresolved 2-3× run-to-run variance of the DCTCP baseline (switch ECN
+marking IS enabled on the SN2410 — see DCTCP runbook metric 7 note).
 
 ### 14. eTran - TCP | 2KB throughput, 64 outstanding, single-threaded | 0.87x TAS | Medium
 
@@ -603,9 +604,10 @@ drops observed during 15s+ runs.
 
 **Ratio vs DCTCP (same 1×1 × 64 config):** **~6.76×** (based on DCTCP 1.82 Gbps
 measured concurrently). Note: DCTCP 2KB throughput varies significantly
-(1.8-4.6 Gbps) based on switch ECN marking state — the earlier 4.6 Gbps DCTCP
-baseline was through a different queue state. Ratio should be recalculated when
-DCTCP stabilizes at its known 4.6 Gbps level (resulting in ~2.65×).
+(1.8-4.6 Gbps) run-to-run — mechanism unresolved (switch ECN marking IS enabled
+on the SN2410; see DCTCP runbook metric 7 note). The earlier 4.6 Gbps DCTCP
+baseline was measured under different conditions. Ratio should be recalculated
+against a stable DCTCP baseline (at 4.6 Gbps the ratio would be ~2.65×).
 
 ### 15. eTran - TCP | 1K persistent connections, 64B requests | 2.26x Linux | 6-Node
 

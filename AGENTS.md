@@ -183,7 +183,13 @@ After patching: `touch micro_kernel/eBPF/homa/main.c && make -j$(nproc)`
   the BPF XDP_EGRESS patch. Benchmark produces valid data even if drops occur.
   Keep `timeout 15` for safety but the caveat is likely stale.
 - **DCTCP 1×1 × 64 throughput varies 2-3×** between runs (1.3-2.8 Gbps for 1KB,
-  1.8-4.6 Gbps for 2KB) due to switch ECN marking state from prior traffic.
+  1.8-4.6 Gbps for 2KB). Switch ECN marking IS enabled on the SN2410 (exact
+  threshold/mode not yet recorded in the runbook — document it on next session),
+  so the earlier "ECN marking state from prior traffic" attribution is
+  unresolved: candidates are a threshold mismatch vs the paper's deduced ~70KB,
+  normal DCTCP oscillation around the marking point, or measurement-window
+  transients. Verify CE marks on the wire (tcpdump IP ECN bits) and pull the
+  switch's ECN counters when re-running.
   This makes the eTran/DCTCP ratio unreliable for any single measurement point.
   When reporting ratios, note the concurrent DCTCP baseline and compare against
   the runbook's best-case DCTCP baseline for a fair comparison.
@@ -271,9 +277,12 @@ wait
 ## Hardware
 - CloudLab xl170, 10-core E5-2640v4 × 1 socket, Mellanox ConnectX-4 Lx 25G
 - Paper used the SAME xl170 nodes (single-socket 10-core E5-2640v4, ConnectX-4
-  25G). The paper's §6 phrase "two 10-core Intel E5-2640v4 CPUs" is a
-  typo (per the authors) — the CloudLab xl170 has a single 10-core CPU per
-  node. Confirmed via `lscpu` on node0: `Socket(s): 1, Core(s) per socket: 10`.
+  25G). The paper's §6 phrase "two 10-core Intel E5-2640v4 CPUs" is assumed to
+  be a typo. NOTE: this is OUR INFERENCE from the CloudLab hardware catalog —
+  the xl170 is the only CloudLab machine matching the paper's spec
+  (E5-2640v4 + ConnectX-4 Lx 25G), and it has a single 10-core CPU per node;
+  all other catalog machines differ. The authors were contacted but never
+  replied. Confirmed via `lscpu` on node0: `Socket(s): 1, Core(s) per socket: 10`.
   No core-count excuse for the throughput gap; treat gaps as real bugs to investigate.
 - NIC: `ens1f1np1` (PCI 0000:03:00.1), NUMA node 0
 - SMT=on (HT enabled, removed `nosmt` from GRUB): 20 logical CPUs online
@@ -451,8 +460,10 @@ ssh node0 "sudo screen -S dctcp_server -X hardcopy /tmp/srv.log; \
   tail latency for 7:1 32B RPC rate, while Homa's grant-based flow control keeps
   tail latency tight (~1.4 ms P99 at similar loads).
 - **DCTCP streaming throughput vs eTran TCP**: DCTCP (plain kernel TCP) achieves
-  ~1.8-2.8 Gbps (1KB, varies with switch ECN) and ~1.8-4.6 Gbps (2KB), versus
+  ~1.8-2.8 Gbps (1KB) and ~1.8-4.6 Gbps (2KB), versus
   eTran's AF_XDP-accelerated TCP at ~7.2 Gbps (1KB) and ~12.3 Gbps (2KB) —
-  a ~2.6-3.95× gap from kernel TCP stack overhead. DCTCP's exact value depends
-  on switch ECN marking state, making single-point ratios unreliable.
+  a ~2.6-3.95× gap from kernel TCP stack overhead. Switch ECN marking IS
+  enabled on the SN2410; DCTCP nonetheless varies 2-3× between runs
+  (mechanism unresolved — see Known issues), making single-point ratios
+  unreliable.
 - Runbook: `Runbooks/DCTCP_Runbook.md` for exact per-metric commands and results.

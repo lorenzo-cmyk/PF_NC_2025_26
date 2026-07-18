@@ -17,6 +17,11 @@
 
 Hardware: CloudLab xl170, single-socket 10-core E5-2640v4, Mellanox ConnectX-4 Lx 25G, SMT=on.
 
+> **Metric numbering is LOCAL to this runbook.** Mapping to
+> `eTran_reproduction_metrics.md`: local #7→metric 13, #8→14, #13→15, #10→18,
+> #11→19, #12→20, #9→21. Local #1–#6 are extra DCTCP baselines (TCP equivalents
+> of the Homa metrics 1–6) with no separate row in the main metrics doc.
+
 | #   | Metric                                                                                    | Result                           | Notes                                                                                                           |
 | --- | ----------------------------------------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | 1   | 32B RTT latency (P50)                                                                     | **22.7 µs**                      | Echo, single-stream, node0↔node1                                                                                |
@@ -25,8 +30,8 @@ Hardware: CloudLab xl170, single-socket 10-core E5-2640v4, Mellanox ConnectX-4 L
 | 4   | 500KB throughput, 1 client → 7 servers                                                    | **23.5 Gbps** client out         | 7 ports × 7 servers saturates client NIC                                                                        |
 | 5   | 32B RPC rate, 7 clients → 1 server                                                        | **~866 Kops** server             | 7 × ~155 Kops clients (--client-max 64, --ports 1 each)                                                         |
 | 6   | 32B RPC rate, 1 client → 7 servers                                                        | **~1082 Kops** client            | 7 × ~155 Kops servers (--client-max 256, --ports 7)                                                             |
-| 7   | 1KB throughput, streaming (epoll)                                                         | **~1.8-2.8 Gbps**, ~222-346 Kops | `epoll_client`, 64 outstanding, single-threaded, 2-node. Varies with switch ECN state                           |
-| 8   | 2KB throughput, streaming (epoll)                                                         | **~1.8-4.6 Gbps**, ~111-283 Kops | `epoll_client`, 64 outstanding, single-threaded, 2-node. Varies with switch ECN state                           |
+| 7   | 1KB throughput, streaming (epoll)                                                         | **~1.8-2.8 Gbps**, ~222-346 Kops | `epoll_client`, 64 outstanding, single-threaded, 2-node. Varies 2-3× run-to-run despite switch ECN marking being enabled (mechanism unresolved) |
+| 8   | 2KB throughput, streaming (epoll)                                                         | **~1.8-4.6 Gbps**, ~111-283 Kops | `epoll_client`, 64 outstanding, single-threaded, 2-node. Same unresolved variance as #7                                                           |
 | 9   | CPU cycles/request (1KB, epoll, client)                                                   | **~7.4 kcycles**                 | vs eTran TCP (AF_XDP): ~2.9 kcycles                                                                             |
 | 10  | KV throughput (flexkvs, 5 clients × 4 threads × 10 conns × 32 pending)                    | **~0.278 Mops**                  | P50≈717 µs, P99≈862 µs. 5 clients steady: ~55.7, ~55.5, ~55.5, ~55.7, ~55.6 Kops                                |
 | 11  | KV P50 latency, under-loaded (flexkvs, 1 thread × 1 conn × 1 pending)                     | **17 µs**                        | P90=22 µs, P99=24 µs. Matches eTran TCP (14 µs) under no load — no congestion means identical network latency   |
@@ -44,11 +49,14 @@ Hardware: CloudLab xl170, single-socket 10-core E5-2640v4, Mellanox ConnectX-4 L
   Homa's (~217-460 µs) for these workloads because there's no AF_XDP polling or
   BPF map contention.
 - **TCP streaming throughput** (metrics 7-8): Using the same `epoll_client` binary
-  as eTran TCP metrics, DCTCP achieves ~1.8-2.8 Gbps (1KB, varies with switch ECN)
+  as eTran TCP metrics, DCTCP achieves ~1.8-2.8 Gbps (1KB)
   and ~1.8-4.6 Gbps (2KB). This is **~2.6-3.95× lower** than eTran's AF_XDP-accelerated
   TCP (~7.2 Gbps / ~12.3 Gbps), confirming that eTran's AF_XDP data-path bypass
-  provides significant throughput gains for small-to-medium messages.
-  softirq processing, and syscall overhead are the bottleneck.
+  provides significant throughput gains for small-to-medium messages — the kernel
+  TCP stack's softirq processing and syscall overhead are the bottleneck.
+  Switch ECN marking IS enabled on the SN2410, but DCTCP throughput still varies
+  2-3× run-to-run (mechanism unresolved — see metric 7 note), so single-point
+  ratios are unreliable.
 - **CPU efficiency** (metric 9): DCTCP uses ~7.4 kcycles/request for 1KB messages,
   ~2.6× more than eTran's AF_XDP TCP (~2.9 kcycles). The kernel TCP stack spends
   ~12s sys vs ~0.8s user, showing the overhead is entirely in kernel TCP processing.
@@ -85,6 +93,14 @@ Hardware: CloudLab xl170, single-socket 10-core E5-2640v4, Mellanox ConnectX-4 L
      ssh $n "for p in \$(pgrep -x cp_node) \$(pgrep -x epoll_server) \$(pgrep -x epoll_client); do sudo kill -9 \$p 2>/dev/null; done"
    done
    ```
+
+6. **Switch ECN marking is ENABLED on the SN2410** (correction 2026-07-18 —
+   earlier versions of this runbook wrongly claimed it was not configured).
+   TODO next session: record the exact marking config here (threshold, mode,
+   per-queue settings from the switch CLI), and verify marking on the wire
+   during a run (tcpdump IP ECN/CE bits + switch ECN counters). This matters
+   for interpreting the DCTCP throughput variance (metrics 7-8) and for any
+   comparison against the paper's DCTCP regime (deduced ~70KB threshold).
 
 6. **No micro_kernel needed** — DCTCP uses standard Linux TCP directly.
 
@@ -260,8 +276,11 @@ Output: `Throughput In/Out(<gbps>/<gbps> Gbps)(<kops> Kops)`
 > **C buffering**: use `stdbuf -oL` or `script -q -c` over SSH (see pre-flight).
 > The server's `-b` must match the client's `-b` (receive buffer size).
 
-**Result** (2026-07-08): **~1.8-2.8 Gbps out**, ~222-346 Kops/sec (varies with switch
-ECN marking state). RTT ~2.9 ms (under load).
+**Result** (2026-07-08): **~1.8-2.8 Gbps out**, ~222-346 Kops/sec. Switch ECN
+marking IS enabled on the SN2410, yet throughput still varies 2-3× between runs
+(mechanism unresolved — threshold mismatch vs the paper's deduced ~70KB, DCTCP
+oscillation around the marking point, or measurement-window transients; verify
+CE marks on the wire when re-running). RTT ~2.9 ms (under load).
 For comparison: eTran TCP (AF_XDP) 1KB = **~7.2 Gbps**, ~878 Kops.
 
 ## Metric 8: DCTCP 2KB Throughput (epoll, Streaming)
@@ -275,8 +294,8 @@ screen -dmS dctcp_epoll bash -c 'cd /local/eTran/eTran/tcp_app && \
 timeout 15 stdbuf -oL bash -c 'cd /local/eTran/eTran/tcp_app && ./epoll_client -i 192.168.6.1 -b 2048 -o 64 -f 1 -t 1'
 ```
 
-**Result** (2026-07-08): **~1.8-4.6 Gbps out**, ~111-283 Kops/sec (varies with switch
-ECN marking state).
+**Result** (2026-07-08): **~1.8-4.6 Gbps out**, ~111-283 Kops/sec (same unresolved
+2-3× run-to-run variance as 1KB — see metric 7 note).
 For comparison: eTran TCP (AF_XDP) 2KB = **~12.3 Gbps**, ~750 Kops.
 
 ## Metric 9: DCTCP CPU Cycles per Request (epoll, 1KB)
@@ -367,12 +386,17 @@ For comparison: eTran TCP = **14 µs P50, 16 µs P99**; paper's Linux-TCP = 64.2
 | 4t×10c×32p | 6400            | ~740 µs   | ~0.27 Mops |
 
 > **Paper discrepancy**: The paper reports Linux-TCP KV latency as 64.2 µs P50.
-> Our DCTCP P50 caps at ~47 µs regardless of client concurrency. The paper's value
-> is produced by **switch-side ECN marking at 70KB threshold** (not configured in
-> our cluster). The marking creates a standing switch buffer of ~70KB, adding
-> ~22 µs of queuing delay. Combined with base latency (~20 µs) and TCP backoff
-> dynamics from ECN, the total reaches ~64 µs. Without switch ECN configuration,
-> the P50 stays low even under significant client load.
+> Our DCTCP P50 caps at ~47 µs regardless of client concurrency.
+> NOTE (corrected 2026-07-18): an earlier version of this note claimed switch
+> ECN marking was "not configured in our cluster" — that was wrong: ECN marking
+> IS enabled on the SN2410 (exact threshold/mode not yet recorded here —
+> document it next session). The earlier theory ("70KB standing queue adds
+> ~22 µs to the under-loaded P50") was also flawed: the under-loaded test
+> (1 thread × 1 conn × 1 pending) never builds a queue, so marking cannot
+> affect it. The paper's higher 64.2 µs P50 more plausibly reflects
+> base-latency/kernel-path differences on their testbed. Marking only matters
+> under load (see the concurrency sweep above), where the comparison is
+> threshold-dependent.
 
 ## Metric 13: DCTCP 1K Persistent Connections, 64B Closed-Loop (epoll, plain TCP)
 
