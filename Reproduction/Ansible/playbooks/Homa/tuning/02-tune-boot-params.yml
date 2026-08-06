@@ -1,5 +1,5 @@
 ---
-- name: Homa node tuning — boot parameters (HT on, mitigations, C-states, ASPM)
+- name: Homa node tuning - boot parameters (HT on, mitigations, C-states, ASPM)
   hosts: all
   become: true
   tasks:
@@ -81,7 +81,7 @@
           if grep -q 'intel_idle.max_cstate=0' /proc/cmdline; then
             echo "disabled (intel_idle.max_cstate=0)"
           else
-            echo "ENABLED — C-states active"
+            echo "ENABLED - C-states active"
           fi
       register: cstate_status
       changed_when: false

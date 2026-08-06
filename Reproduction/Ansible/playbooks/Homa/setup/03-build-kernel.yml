@@ -1,5 +1,5 @@
 ---
-- name: Homa node setup — configure, compile and install vanilla Linux 6.17.8
+- name: Homa node setup - configure, compile and install vanilla Linux 6.17.8
   hosts: all
   tasks:
     - name: Copy verified kernel .config to build tree

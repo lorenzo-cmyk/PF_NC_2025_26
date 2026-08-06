@@ -1,5 +1,5 @@
 ---
-- name: eTran node setup — configure, compile and install kernel
+- name: eTran node setup - configure, compile and install kernel
   hosts: all
   tasks:
     - name: Copy verified kernel .config to build tree

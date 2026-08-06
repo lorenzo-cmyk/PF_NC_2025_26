@@ -1,5 +1,5 @@
 ---
-- name: DCTCP node setup — configure DCTCP runtime parameters
+- name: DCTCP node setup - configure DCTCP runtime parameters
   hosts: all
   become: true
   tasks:

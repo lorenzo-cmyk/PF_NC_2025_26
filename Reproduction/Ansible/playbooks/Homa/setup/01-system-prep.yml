@@ -1,5 +1,5 @@
 ---
-- name: Homa node setup — system preparation
+- name: Homa node setup - system preparation
   hosts: all
   become: true
   vars:

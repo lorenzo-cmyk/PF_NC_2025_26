@@ -1,5 +1,5 @@
 ---
-- name: eTran evaluation — set MTU
+- name: eTran evaluation - set MTU
   hosts: all
   become: true
   gather_facts: false

@@ -1,5 +1,5 @@
 ---
-- name: eTran evaluation — enable IP forwarding (persistent)
+- name: eTran evaluation - enable IP forwarding (persistent)
   hosts: all
   become: true
   tasks:
@@ -11,7 +11,7 @@
         state: present
         reload: true
 
-- name: eTran evaluation — gather interface facts
+- name: eTran evaluation - gather interface facts
   hosts: all
   become: true
   gather_facts: false
@@ -38,7 +38,7 @@
       ansible.builtin.debug:
         msg: "{{ inventory_hostname }}: IP={{ node_ip }} MAC={{ node_mac }}"
 
-- name: eTran evaluation — install permanent ARP entries
+- name: eTran evaluation - install permanent ARP entries
   hosts: all
   become: true
   gather_facts: false
@@ -65,7 +65,7 @@
           - "=== {{ inventory_hostname }} ARP table ==="
           - "{{ arp_verify.stdout_lines }}"
 
-- name: eTran evaluation — install /etc/hosts entries
+- name: eTran evaluation - install /etc/hosts entries
   hosts: all
   become: true
   gather_facts: false
@@ -73,7 +73,7 @@
     - name: Build /etc/hosts block for all nodes
       ansible.builtin.blockinfile:
         path: /etc/hosts
-        marker: "# {mark} ANSIBLE MANAGED — eTran cluster"
+        marker: "# {mark} ANSIBLE MANAGED - eTran cluster"
         block: |
           {% for host in groups['all'] %}
           {{ hostvars[host].node_ip }} {{ host }}
@@ -95,7 +95,7 @@
           - "=== {{ inventory_hostname }} /etc/hosts ==="
           - "{{ hosts_verify.stdout_lines }}"
 
-- name: eTran evaluation — apply runtime NIC tuning
+- name: eTran evaluation - apply runtime NIC tuning
   hosts: all
   become: true
   gather_facts: false
@@ -136,7 +136,7 @@
       changed_when: false
       failed_when: false
 
-- name: eTran evaluation — ping all other nodes by hostname
+- name: eTran evaluation - ping all other nodes by hostname
   hosts: all
   become: false
   gather_facts: false

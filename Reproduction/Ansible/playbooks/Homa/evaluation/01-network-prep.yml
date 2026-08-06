@@ -1,4 +1,4 @@
-- name: Homa evaluation — enable IP forwarding (persistent)
+- name: Homa evaluation - enable IP forwarding (persistent)
   hosts: all
   become: true
   tasks:
@@ -10,7 +10,7 @@
         state: present
         reload: true
 
-- name: Homa evaluation — gather interface facts
+- name: Homa evaluation - gather interface facts
   hosts: all
   become: true
   gather_facts: false
@@ -37,7 +37,7 @@
       ansible.builtin.debug:
         msg: "{{ inventory_hostname }}: IP={{ node_ip }} MAC={{ node_mac }}"
 
-- name: Homa evaluation — install permanent ARP entries
+- name: Homa evaluation - install permanent ARP entries
   hosts: all
   become: true
   gather_facts: false
@@ -64,7 +64,7 @@
           - "=== {{ inventory_hostname }} ARP table ==="
           - "{{ arp_verify.stdout_lines }}"
 
-- name: Homa evaluation — install /etc/hosts entries
+- name: Homa evaluation - install /etc/hosts entries
   hosts: all
   become: true
   gather_facts: false
@@ -72,7 +72,7 @@
     - name: Build /etc/hosts block for all nodes
       ansible.builtin.blockinfile:
         path: /etc/hosts
-        marker: "# {mark} ANSIBLE MANAGED — Homa cluster"
+        marker: "# {mark} ANSIBLE MANAGED - Homa cluster"
         block: |
           {% for host in groups['all'] %}
           {{ hostvars[host].node_ip }} {{ host }}
@@ -94,7 +94,7 @@
           - "=== {{ inventory_hostname }} /etc/hosts ==="
           - "{{ hosts_verify.stdout_lines }}"
 
-- name: Homa evaluation — apply runtime NIC tuning
+- name: Homa evaluation - apply runtime NIC tuning
   hosts: all
   become: true
   gather_facts: false
@@ -135,7 +135,7 @@
       changed_when: false
       failed_when: false
 
-- name: Homa evaluation — enable segmentation offload
+- name: Homa evaluation - enable segmentation offload
   hosts: all
   become: true
   gather_facts: false
@@ -155,7 +155,7 @@
       changed_when: false
       failed_when: false
 
-- name: Homa evaluation — set CPU governor to performance
+- name: Homa evaluation - set CPU governor to performance
   hosts: all
   become: true
   gather_facts: false
@@ -164,7 +164,7 @@
       ansible.builtin.shell: echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
       changed_when: false
 
-- name: Homa evaluation — set Homa qdisc
+- name: Homa evaluation - set Homa qdisc
   hosts: all
   become: true
   gather_facts: false
@@ -186,7 +186,7 @@
           - "=== {{ inventory_hostname }} qdisc ==="
           - "{{ homa_qdisc_verify.stdout_lines }}"
 
-- name: Homa evaluation — ping all other nodes by hostname
+- name: Homa evaluation - ping all other nodes by hostname
   hosts: all
   become: false
   gather_facts: false

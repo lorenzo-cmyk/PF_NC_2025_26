@@ -1,5 +1,5 @@
 ---
-- name: Homa node setup — verify all
+- name: Homa node setup - verify all
   hosts: all
   gather_facts: false
   vars:
