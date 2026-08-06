@@ -1,5 +1,3 @@
-> Note: metric IDs follow `eTran_reproduction_metrics.md`. Metrics 1-6 are extra DCTCP baselines (no row in the metrics doc); metrics 13-15 and 18-21 are the DCTCP baselines for the eTran TCP metrics with the same IDs. Source-runbook local mapping: #7->13, #8->14, #13->15, #10->18, #11/12->19/20, #9->21.
-
 # Metric 1: 32B RTT latency (echo, single stream)
 
 - Number of nodes required: 2
