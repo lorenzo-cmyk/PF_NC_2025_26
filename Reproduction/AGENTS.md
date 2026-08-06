@@ -181,9 +181,11 @@ for current runs; do not re-apply it even if the eTran source is re-cloned.
   by PID.
 - Skipping shm cleanup between eTran metrics -> silent BPF stalls.
 - `-b` (busy-poll) on micro_kernel -> breaks Homa benchmarks.
-- `--queues N` on cp_node client -> kills throughput (e.g. 927 -> 86 Kops).
+- `--queues N` on cp_node client -> kills throughput ~12x; never pass it
+  (measured values: Report/Measurements/Tuning_History.md, "What hurts").
 - Doubling `umem_num_frames` -> no help, extra overhead.
-- GRO/TSO off or Intel Turbo off -> ~39% regression on metric 5; keep them on.
+- GRO/TSO off or Intel Turbo off -> ~39% regression on metric 5; keep them on
+  (measured values: Report/Measurements/Tuning_History.md, "What hurts").
 - `taskset` on micro_kernel or app threads -> not needed; `CP_CPU=19`
   internal pin works with SMT on (app-thread taskset has no measurable effect).
 - A micro_kernel stuck in D-state (uninterruptible BPF syscall, e.g.
