@@ -7,10 +7,8 @@ Consolidated measured results for the three benchmark stacks:
 - DCTCP: standard Linux TCP with tcp_dctcp + ECN (baseline for eTran TCP)
 
 Units: latency in us, throughput in Gbps, RPC rate in Kops/Mops, CPU in
-kcycles. "-" = metric not applicable/not measured for that stack. DCTCP
-values use the main metric IDs (its runbook local mapping: #7->13, #8->14,
-#13->15, #10->18, #11/12->19/20, #9->21). Per-metric secondary
-measurements are in the appendix at the end.
+kcycles. "-" = metric not applicable/not measured for that stack.
+Per-metric secondary measurements are in the appendix at the end.
 
 # Metric 1: 32B RTT latency (echo, single stream)
 
@@ -87,7 +85,8 @@ residual is the open question. DCTCP P99 is 2-5 ms (TCP incast tail).
 # Metric 6: 32B RPC rate, 1 client -> 7 servers
 
 Description: Aggregate RPC rate for 32B messages, 1 client to 7 servers
-(7 ports, 256 outstanding). 8 nodes.
+(7 ports; --client-max 256 -> 36 outstanding per port, 252 in flight
+due to integer division). 8 nodes.
 
 Results:
 | eTran (Homa)                              | Linux-Homa            | DCTCP      |
@@ -208,8 +207,8 @@ the paper spec; 16 vs 32 gives identical results.
 
 # Metric 19: TCP KV P50 latency, under-loaded
 
-Description: KV GET latency P50 with a single client, 1 thread x 1 conn x
-1 pending (server unloaded). 2 nodes.
+Description: KV request latency P50 (90% GET / 10% SET mix) with a
+single client, 1 thread x 1 conn x 1 pending (server unloaded). 2 nodes.
 
 Results:
 | eTran (TCP)              | Linux-Homa | DCTCP                              |
@@ -222,8 +221,8 @@ differences, not switch ECN (marking cannot affect the queue-free test).
 
 # Metric 20: TCP KV P99 latency, under-loaded
 
-Description: KV GET latency P99 with a single client, 1 thread x 1 conn x
-1 pending (server unloaded). 2 nodes.
+Description: KV request latency P99 (90% GET / 10% SET mix) with a
+single client, 1 thread x 1 conn x 1 pending (server unloaded). 2 nodes.
 
 Results:
 | eTran (TCP)              | Linux-Homa | DCTCP      |
@@ -250,8 +249,10 @@ mean outperforming. eTran is ~2.5x more efficient than DCTCP.
 
 # Metric 22: Homa CPU cycles per request
 
-Description: Total CPU cycles consumed per request, 32B Homa RPC workload.
-2 nodes.
+Description: Total CPU cycles consumed per request. Linux-Homa: 32B Homa
+RPC workload (matches paper). eTran: per its runbook, measured with the
+1MB workload (--workload 999999 --one-way), so the raw value is NOT a 32B
+comparison. 2 nodes.
 
 Results:
 | eTran (Homa)                                            | Linux-Homa    | DCTCP |

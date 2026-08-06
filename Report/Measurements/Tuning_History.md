@@ -154,8 +154,9 @@ eBPF code, not in OS tunings:
   (`return XDP_TX`): per-CPU `HOMA_OVERCOMMITMENT=8` with an 8-step
   tail-call chain (~8 BPF executions per grant) - the suspected ~13 Gbps
   ceiling on metric 3.
-- `micro_kernel/eBPF/homa/main.c:418,451,460,588` - `bpf_redirect_map`
-  calls in the Homa XDP program (map lookup cost).
+- `micro_kernel/eBPF/homa/main.c` - `bpf_redirect_map` calls in the Homa
+  XDP program (map lookup cost); at current repo HEAD lines 389, 413,
+  446, 455, 583 (line numbers drift across commits).
 - BPF RPC-map contention between the app fastpath and mk's 1 ms
   `poll_homa_to` batch scan (`micro_kernel/homa.cc:485`).
 
