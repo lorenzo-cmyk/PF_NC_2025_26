@@ -4,7 +4,7 @@
   tasks:
     - name: Copy verified kernel .config to build tree
       ansible.builtin.copy:
-        src: /home/lorenzo/repos/PF_NC_REBORN/Ansible/files/kernel-config
+        src: "{{ inventory_dir }}/../files/kernel-config"
         dest: /local/eTran-linux/.config
         owner: "{{ ansible_user }}"
         mode: "0644"
