@@ -18,9 +18,9 @@ Description: Round-trip time of 32B echo RPCs, single client thread to a
 single-threaded server. 2 nodes.
 
 Results:
-| eTran (Homa)                                   | Linux-Homa                | DCTCP                    |
-| ---------------------------------------------- | ------------------------- | ------------------------ |
-| P50 12.59 us, P99 14.85 us (93% of paper 11.8) | P50 ~16 us, P99 ~25-35 us | P50 22.7 us, P99 26.4 us |
+| eTran (Homa)                                   | Linux-Homa                                    | DCTCP                    |
+| ---------------------------------------------- | --------------------------------------------- | ------------------------ |
+| P50 12.59 us, P99 14.85 us (93% of paper 11.8) | P50 ~16 us (15.26, paper 15.6), P99 ~25-35 us | P50 22.7 us, P99 26.4 us |
 
 Notes: eTran and kernel Homa are both close to paper; eTran's AF_XDP fastpath
 is ~1.27x faster than kernel Homa. DCTCP is the plain-TCP baseline with
@@ -32,13 +32,15 @@ Description: Sustained throughput of back-to-back 1MB RPCs, single client to
 single-threaded server (`--one-way`). 2 nodes.
 
 Results:
-| eTran (Homa)                  | Linux-Homa                                    | DCTCP     |
-| ----------------------------- | --------------------------------------------- | --------- |
-| 16.6 Gbps (94% of paper 17.7) | ~10-11 Gbps (conflicting: 17.9 Gbps on 07-08) | 21.5 Gbps |
+| eTran (Homa)                  | Linux-Homa                                                | DCTCP     |
+| ----------------------------- | --------------------------------------------------------- | --------- |
+| 16.6 Gbps (94% of paper 17.7) | ~10-11 Gbps (conflicting: 17.9 Gbps on 07-08; paper 14.5) | 21.5 Gbps |
 
 Notes: Unresolved Linux-Homa conflict (17.9 vs 10-11 Gbps, same commands,
-different sessions - re-measure). DCTCP saturates the 25G NIC for bulk
-transfers.
+different sessions). The 07-09 value is internally consistent (RTT P50 ~720 us
+=> ~11 Gbps at 1MB per RPC); candidate: qdisc/sysctl state differences
+between sessions. Re-measure on next cluster allocation before quoting
+either. DCTCP saturates the 25G NIC for bulk transfers.
 
 # Metric 3: 500KB throughput, 7 clients -> 1 server
 
@@ -46,14 +48,14 @@ Description: Server throughput receiving concurrent 500KB RPCs from 7
 clients, 4 server threads. 8 nodes.
 
 Results:
-| eTran (Homa)                         | Linux-Homa | DCTCP               |
-| ------------------------------------ | ---------- | ------------------- |
-| ~12.78-12.9 Gbps (56% of paper 23.0) | ~23 Gbps   | 23.5 Gbps server in |
+| eTran (Homa)                         | Linux-Homa            | DCTCP               |
+| ------------------------------------ | --------------------- | ------------------- |
+| ~12.78-12.9 Gbps (56% of paper 23.0) | ~23 Gbps (paper 23.1) | 23.5 Gbps server in |
 
-Notes: eTran is capped at ~13 Gbps regardless of server `--ports` (4/5/7
-equivalent; 10 -> 8 Gbps). Real eBPF bottleneck: XDP_GEN grant dispatch
-serialization, NOT server parallelism or core count. Kernel Homa and DCTCP
-saturate the link.
+Notes: eTran is capped at ~13 Gbps regardless of server `--ports`
+(4/5/7 -> 12.9/12.78/12.77 Gbps; 10 -> 8.01 Gbps). Real eBPF bottleneck:
+XDP_GEN grant dispatch serialization, NOT server parallelism or core
+count. Kernel Homa and DCTCP saturate the link.
 
 # Metric 4: 500KB throughput, 1 client -> 7 servers
 
@@ -61,9 +63,9 @@ Description: Client throughput sending concurrent 500KB RPCs to 7 servers,
 7 sending threads. 8 nodes.
 
 Results:
-| eTran (Homa)                   | Linux-Homa | DCTCP                |
-| ------------------------------ | ---------- | -------------------- |
-| ~19.5 Gbps (86% of paper 22.7) | ~22.5 Gbps | 23.5 Gbps client out |
+| eTran (Homa)                   | Linux-Homa              | DCTCP                |
+| ------------------------------ | ----------------------- | -------------------- |
+| ~19.5 Gbps (86% of paper 22.7) | ~23.1 Gbps (paper 22.9) | 23.5 Gbps client out |
 
 Notes: eTran gap is NOT the NIC (paper hit 22.7 on the same 25G link); likely
 XDP_GEN grant pacing plus per-app-thread send rate on the client.
@@ -74,9 +76,9 @@ Description: Aggregate RPC rate for 32B messages, 7 clients to 1 server
 (7 server threads, 64 outstanding per client). 8 nodes.
 
 Results:
-| eTran (Homa)                             | Linux-Homa | DCTCP     |
-| ---------------------------------------- | ---------- | --------- |
-| ~927 Kops server (32% of paper 2.9 Mops) | ~1.1 Mops  | ~866 Kops |
+| eTran (Homa)                             | Linux-Homa            | DCTCP     |
+| ---------------------------------------- | --------------------- | --------- |
+| ~927 Kops server (32% of paper 2.9 Mops) | ~1.1 Mops (paper 1.7) | ~866 Kops |
 
 Notes: eTran gap is per-app-thread polling + BPF RPC-map contention (mk is
 off the data path). Paper eTran/Linux-Homa ratio 1.71x vs our 0.85x - the
@@ -88,9 +90,9 @@ Description: Aggregate RPC rate for 32B messages, 1 client to 7 servers
 (7 ports, 256 outstanding). 8 nodes.
 
 Results:
-| eTran (Homa)                              | Linux-Homa | DCTCP      |
-| ----------------------------------------- | ---------- | ---------- |
-| ~1120 Kops client (34% of paper 3.3 Mops) | ~0.9 Mops  | ~1082 Kops |
+| eTran (Homa)                              | Linux-Homa            | DCTCP      |
+| ----------------------------------------- | --------------------- | ---------- |
+| ~1120 Kops client (34% of paper 3.3 Mops) | ~0.9 Mops (paper 1.8) | ~1082 Kops |
 
 Notes: eTran beats kernel Homa here (paper ratio 1.83x vs our 1.24x). DCTCP
 P50 ~66 us is best-in-class for this workload (no AF_XDP polling overhead).
@@ -115,11 +117,19 @@ Results:
 | W5       | Shortest-10% P50 / P99 | 14530 / 48026  | 61 / 84       | -     |
 
 Notes: W2/W3 P99 slowdown (eTran vs Linux-Homa) is 7.0x / 6.7x - within the
-paper's expected 3.9-7.5x. P50 slowdowns (0.86x / 0.87x) are BELOW the
-paper's 1.4-3.6x. W4/W5 eTran values are INVALID: the system is overloaded
-at the 20 Gbps offered load (eTran can only drain ~13 Gbps), so they reflect
-queue build-up, not protocol behavior. Kernel Homa handles small messages in
-mixed workloads far better (22-61 us vs eTran's 2.8-14.5 ms).
+paper's expected 3.9-7.5x. Kernel Homa's worse P99 under short-message
+load reflects TCP-style incast queuing: it has no grant-based flow control,
+where eTran's XDP_GEN grants prevent incast. P50 slowdowns (0.86x / 0.87x)
+are BELOW the paper's 1.4-3.6x. W4/W5 eTran values are INVALID: the system
+is overloaded at the 20 Gbps offered load (eTran can only drain ~13 Gbps),
+so they reflect queue build-up, not protocol behavior. Kernel Homa handles
+small messages in mixed workloads far better (22-61 us vs eTran's
+2.8-14.5 ms). Linux-Homa's W4/W5 runs used a different harness
+(pre-started servers + piped stdin, self-targeting overhead), so those
+comparisons are under dissimilar conditions. Re-measurement plan: sweep
+offered load below each stack's sustainable rate with achieved-load
+reporting, use identical harness for both stacks (e.g., backport
+`--both`/`--id` to HomaModule's cp_node).
 
 # Metric 13: TCP 1KB throughput, 64 outstanding
 
@@ -131,9 +141,15 @@ Results:
 | ----------------------------------------------------------------------------------- | ---------- | --------------------------- |
 | 1x1: ~7.19 Gbps / 878 Kops; 1x5: ~12.1 Gbps / 1474 Kops; 5x5: ~7.55 Gbps / 922 Kops | -          | 1.8-2.8 Gbps / 222-346 Kops |
 
-Notes: eTran/DCTCP ratio ~3.95x at 1x1 (paper expects 4.8x). DCTCP baseline
-varies 2-3x run-to-run (switch ECN marking unresolved), so single-point
-ratios are unreliable. 5x5 x 64 (1600 in-flight) is stable, no drops.
+Notes: eTran/DCTCP ratios ~3.95x (1x1), ~3.98x (1x5), ~2.79x (5x5) - best
+~3.96-3.98x vs paper's 4.8x, consistent across concurrency levels. Main
+bottleneck is server-side queue contention (single 5-thread client hits
+1474 Kops, 5x5 aggregate drops to 922 Kops). DCTCP baseline varies 2-3x
+run-to-run; switch ECN marking IS enabled on the SN2410 (corrected
+2026-07-18), so the mechanism is unresolved: threshold mismatch vs the
+paper's deduced ~70KB, DCTCP oscillation around the marking point, or
+measurement-window transients. Single-point ratios are unreliable.
+5x5 x 64 (1600 in-flight) is stable for 20s+ runs, no drops.
 
 # Metric 14: TCP 2KB throughput, 64 outstanding
 
@@ -215,7 +231,8 @@ Results:
 | 16 us (beats paper 27.5) | -          | 24 us idle |
 
 Notes: eTran beats the paper target; tight distribution (14-18 us up to
-P99.9). Same testbed caveat as metric 19 for the DCTCP value.
+P99.9). Same testbed caveat as metric 19 for the DCTCP value (paper's
+Linux-TCP P99 target is 89.3 us).
 
 # Metric 21: TCP CPU cycles per request
 
@@ -245,6 +262,31 @@ Notes: eTran's raw value is dominated by idle busy-polling (99.6%); active
 processing ~5 kcycles matches the paper's 5.48. Linux-Homa is close to
 paper's 17.43.
 
+# Table 5: CPU cycles per request - component breakdown (paper values)
+
+Paper's per-component breakdown (kcycles) under a single NAPI context
+(Table 5 of the paper). Only totals were measured on this cluster (metric
+21 for TCP, metric 22 for Homa); per-component attribution was not done.
+
+| Component     | eTran TCP | Linux TCP | eTran Homa | Linux Homa |
+| ------------- | --------- | --------- | ---------- | ---------- |
+| Application   | 0.48      | 0.53      | 0.95       | 1.04       |
+| Socket / RPC  | 0.63      | 3.50      | 0.98       | 3.38       |
+| Data Copy     | 0.19      | 0.57      | 0.32       | 1.30       |
+| Sk_buff       | 0.15      | 0.47      | 0.08       | 0.39       |
+| TCP/Homa + IP | 1.06      | 2.12      | 1.47       | 3.36       |
+| Lock / Unlock | 0.18      | 0.45      | 0.24       | 2.68       |
+| NIC Driver    | 1.17      | 1.54      | 0.83       | 1.81       |
+| Memory Mgmt   | 0.05      | 0.32      | 0.06       | 1.04       |
+| Scheduling    | 0.25      | 1.19      | 0.18       | 1.02       |
+| Other         | 0.21      | 1.82      | 0.38       | 1.41       |
+| **TOTAL**     | **4.37**  | **12.51** | **5.48**   | **17.43**  |
+
+Measured totals (metric 21 / 22): eTran TCP ~2.93 kcycles server-side
+(2026-07-08), Linux TCP ~7.4 kcycles client-side (2026-07-08), eTran Homa
+~1357 kcycles raw (AF_XDP busy-poll, 99.6% idle; ~5 kcycles active),
+Linux Homa ~18.6 kcycles.
+
 # Metric 3.1: XDP_EGRESS egress overhead (driver microbenchmark)
 
 Description: Throughput loss from stacking XDP_EGRESS features on an
@@ -268,13 +310,30 @@ Description: ACK/credit packet generation throughput on a second core while
 the first core drops received packets. 2 nodes.
 
 Results:
-| Config            | eTran measured | Paper target                         |
-| ----------------- | -------------- | ------------------------------------ |
-| l2fwd baseline    | not measured   | 6.73 Mpps overall, 1.74 active cores |
-| rx-drop + XDP_GEN | not measured   | 6.03 Mpps overall, 1.35 active cores |
+| Config            | eTran measured | Paper target                                     |
+| ----------------- | -------------- | ------------------------------------------------ |
+| l2fwd baseline    | not measured   | 6.73 Mpps overall (3.87/core), 1.74 active cores |
+| rx-drop + XDP_GEN | not measured   | 6.03 Mpps overall (4.47/core), 1.35 active cores |
 
 Notes: Never benchmarked - requires a BPF program using the XDP_GEN hook
 that is not provided as a standalone build target.
+
+# Paper targets for unmeasured / low-priority metrics
+
+Not benchmarked on this cluster; kept for completeness. Pacing and
+packet-loss tests need extra testbed setup; TAS is a separate project.
+
+| Metric                                            | Paper target                         | Why not measured          |
+| ------------------------------------------------- | ------------------------------------ | ------------------------- |
+| Pacing: rate conformance deviation (1MB @ 8 Gbps) | < 0.4%                               | low priority              |
+| Pacing: aggregate throughput, 8 Gbps target       | 7950-8050 Mbps                       | low priority              |
+| eTran TCP throughput penalty @ 1% loss            | ~8%                                  | no loss-injection testbed |
+| eTran TCP throughput penalty @ 5% loss            | ~33%                                 | no loss-injection testbed |
+| eTran Homa throughput penalty @ 5% loss           | ~90-100%                             | no loss-injection testbed |
+| TAS TCP 1KB throughput (64 outstanding)           | 7.7x Linux -> 21.56 Gbps             | no TAS baseline           |
+| TAS TCP 2KB throughput                            | reference baseline                   | no TAS baseline           |
+| TAS TCP 1K persistent connections (64B)           | 4.1x Linux -> 0.959 Mops             | no TAS baseline           |
+| TAS TCP KV throughput                             | (3.9-7.9)x Linux -> 1.084-2.196 Mops | no TAS baseline           |
 
 # Appendix: secondary measurements
 
