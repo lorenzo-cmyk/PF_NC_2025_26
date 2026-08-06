@@ -108,8 +108,11 @@ tool is unavailable on the cluster and was skipped.
 
 The old `tuning/05-runtime-tuning.yml` playbook applied the items above;
 it was REMOVED because they showed no measurable benefit. Do not re-add
-it without re-running the table. Detailed rationale is in git history
-(commits 4b0aa50, 9b7b73d, 64502bf, 197bdf3, 82fdecf, 8dcc52d, b878a4d).
+it without re-running the table. The detailed rationale is the cumulative
+table above. Surviving git history (the pre-rewrite commits those hashes
+pointed to are gone): `cd81b6e` - tuning playbooks ported from the shell
+script; `1f549fc` + `c01f6f6` - no-effect experiment results; `3fa96ec` -
+IRQ-pinning playbook removed; `92ecb6c` - this file added.
 
 ### Pre-HT-on workarounds (all obsolete once SMT was enabled)
 
