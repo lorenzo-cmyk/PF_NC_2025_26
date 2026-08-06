@@ -1,5 +1,5 @@
 ---
-- name: DCTCP node setup — compile HomaModule benchmark utilities
+- name: DCTCP node setup - compile HomaModule benchmark utilities
   hosts: all
   tasks:
     - name: Check if utils are already compiled

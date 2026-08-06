@@ -1,5 +1,5 @@
 ---
-- name: eTran node tuning — install and enable tuned
+- name: eTran node tuning - install and enable tuned
   hosts: all
   become: true
   tasks:

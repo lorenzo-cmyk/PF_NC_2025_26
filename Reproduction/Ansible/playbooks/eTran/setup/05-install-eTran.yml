@@ -1,5 +1,5 @@
 ---
-- name: eTran node setup — install and compile eTran
+- name: eTran node setup - install and compile eTran
   hosts: all
   tasks:
     - name: Check if bpftool/llvm were installed

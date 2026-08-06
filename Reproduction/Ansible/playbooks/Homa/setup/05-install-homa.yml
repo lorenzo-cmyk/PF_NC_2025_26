@@ -1,5 +1,5 @@
 ---
-- name: Homa node setup — install and compile Homa
+- name: Homa node setup - install and compile Homa
   hosts: all
   vars:
     homa_num_nodes: "{{ groups['all'] | length }}"

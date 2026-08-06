@@ -1,5 +1,5 @@
 ---
-- name: eTran node setup — verify all
+- name: eTran node setup - verify all
   hosts: all
   gather_facts: false
   vars:

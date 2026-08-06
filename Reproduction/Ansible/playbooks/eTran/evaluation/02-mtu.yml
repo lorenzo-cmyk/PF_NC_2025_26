@@ -1,5 +1,5 @@
 ---
-- name: eTran evaluation — set MTU (default 1500, no-op unless overridden)
+- name: eTran evaluation - set MTU (default 1500, no-op unless overridden)
   hosts: all
   become: true
   gather_facts: false

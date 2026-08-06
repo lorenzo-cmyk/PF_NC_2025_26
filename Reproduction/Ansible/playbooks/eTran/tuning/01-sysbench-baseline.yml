@@ -1,5 +1,5 @@
 ---
-- name: eTran node tuning — sysbench baseline
+- name: eTran node tuning - sysbench baseline
   hosts: all
   become: true
   tasks:

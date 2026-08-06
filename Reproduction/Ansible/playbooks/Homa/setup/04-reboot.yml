@@ -1,5 +1,5 @@
 ---
-- name: eTran node setup — reboot to new kernel
+- name: eTran node setup - reboot to new kernel
   hosts: all
   become: true
   tasks:

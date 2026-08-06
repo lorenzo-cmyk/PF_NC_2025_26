@@ -1,5 +1,5 @@
 ---
-- name: eTran node setup — system preparation
+- name: eTran node setup - system preparation
   hosts: all
   become: true
   vars:

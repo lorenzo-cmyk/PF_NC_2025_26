@@ -1,5 +1,5 @@
 ---
-- name: eTran node tuning — verify all + post-tuning benchmark
+- name: eTran node tuning - verify all + post-tuning benchmark
   hosts: all
   gather_facts: false
   tasks:

@@ -1,5 +1,5 @@
 ---
-- name: DCTCP node setup — clone HomaModule sources
+- name: DCTCP node setup - clone HomaModule sources
   hosts: all
   tasks:
     - name: Create /local owned by the ansible user

@@ -1,5 +1,5 @@
 ---
-- name: eTran evaluation — verify network + NIC tuning
+- name: eTran evaluation - verify network + NIC tuning
   hosts: all
   become: true
   gather_facts: false
