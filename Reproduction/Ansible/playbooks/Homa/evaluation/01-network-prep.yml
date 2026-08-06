@@ -145,13 +145,13 @@
   tasks:
     - name: Set Homa max_gso_size
       ansible.builtin.command:
-        cmd: sysctl .net.homa.max_gso_size={{ max_gso_size }}
+        cmd: sysctl net.homa.max_gso_size={{ max_gso_size }}
       changed_when: false
       failed_when: false
 
     - name: Set Homa hijack_tcp (TCP hijacking for TSO on non-Mellanox NICs)
       ansible.builtin.command:
-        cmd: sysctl .net.homa.hijack_tcp={{ hijack_tcp }}
+        cmd: sysctl net.homa.hijack_tcp={{ hijack_tcp }}
       changed_when: false
       failed_when: false
 

@@ -1,10 +1,12 @@
 ---
-- name: eTran evaluation - set MTU
+- name: Homa evaluation - set MTU (default 1500, no-op unless overridden)
   hosts: all
   become: true
   gather_facts: false
   vars:
-    mtu: 9000
+    # ToR switch does NOT support jumbo frames - never set mtu=9000 here
+    # (see AGENTS.md and Tuning_History.md "What hurts").
+    mtu: 1500
     iface: ens1f1np1
   tasks:
     - name: Set MTU on primary interface
