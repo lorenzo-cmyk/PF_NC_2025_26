@@ -162,6 +162,9 @@ done
 
 Execution:
 ```bash
+# Server (node0)
+sudo screen -dmS homa_server bash -c 'cd /local/HomaModule/util && exec ./cp_node server --ports 7'
+
 sudo perf stat -e cycles,instructions,context-switches,cpu-migrations,page-faults \
   timeout 20 ./cp_node client \
   --first-server 0 \
