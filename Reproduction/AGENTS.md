@@ -43,12 +43,16 @@ node1-node9. SSH key: `~/.ssh/SSH_Key_Cloudlab`. `profile.py`:
 ### After every reboot
 
 A reboot resets: ARP table, `/etc/hosts`, NIC coalescing, flow control,
-queue count, MTU.
+queue count, MTU (and, for Linux-Homa runs, the `homa` qdisc and
+`net.homa.*` sysctls).
 
 ```bash
 cd Reproduction/Ansible
 .venv/bin/ansible-playbook playbooks/eTran/evaluation/01-network-prep.yml
 .venv/bin/ansible-playbook playbooks/eTran/evaluation/03-verify-network.yml
+# For Linux-Homa runs, also re-apply the Homa-specific steps (homa qdisc,
+# net.homa.max_gso_size/hijack_tcp, governor):
+.venv/bin/ansible-playbook playbooks/Homa/evaluation/01-network-prep.yml
 ```
 
 Keep MTU at 1500 - the ToR switch does not support jumbo frames, so do
@@ -64,8 +68,10 @@ NOT set `mtu=9000` (skip the 02-mtu.yml playbook; its default is a no-op).
   - Homa/DCTCP: `/local/HomaModule/util/cp_node`
 - Hostname resolution: cp_node resolves `node0..node9` via `getaddrinfo()`
   (`/etc/hosts` is set by 01-network-prep).
-- Interface: `ens1f1np1` is hardcoded in `cp_node.cc`, `micro_kernel.cc`,
-  `xdpsock.c` - recompile if your NIC differs.
+- Interface: `ens1f1np1` is hardcoded in `cp_node.cc`, `micro_kernel.cc`
+  (default), and the process-proxy xdpsock
+  (`process-proxy/{non_priviledged,priviledged}_process.c`) - recompile
+  if your NIC differs. (`bench-afxdp/xdpsock.c` takes `-i` instead.)
 
 ## Benchmark procedure (generic)
 
