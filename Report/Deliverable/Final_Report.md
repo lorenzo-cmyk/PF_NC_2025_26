@@ -1,4 +1,4 @@
-# Replicating: "eTran: extensible kernel transport with eBPF"
+# **Replicating: "eTran: extensible kernel transport with eBPF"**
 
 **Team Members:**
 
@@ -64,15 +64,30 @@ To demonstrate the feasibility of the platform, the authors implemented two proo
 
 ---
 
-# 2. Selected Result
+# **2. Selected Result**
 
-Mention which result of the paper you are reproducing, and explain its importance.
+The selected result is a cross-stack comparison between the transport implementations shipped with eTran and their Linux counterparts. We compare eTran-Homa with Linux-Homa, and eTran-DCTCP with Linux-DCTCP.
 
-For example:
+The eTran-Homa and Linux-Homa comparison uses the same Homa protocol with two different data paths. eTran runs Homa through AF_XDP, eBPF, and the eTran user-space library, while Linux-Homa uses the Homa kernel module. The eTran-DCTCP and Linux-DCTCP comparison follows the same idea for TCP with DCTCP: eTran uses its eBPF transport path, while Linux-DCTCP uses the standard Linux TCP stack with `tcp_dctcp` and ECN.
 
-> "Figure 1 shows that method A improves throughput by 35% over method B under workload *W*. This experiment shows that paper can effectively overcome the motivated challenge."
+This comparison tests whether eTran can retain the protection of kernel networking while achieving the performance expected from a specialized transport implementation. Comparing the same protocol across the two stacks also limits the effect of protocol design when interpreting the results.
 
-![The figure shows that method A improves throughput compared to method B](figures/one_bar.png){width=30%}
+The evaluation uses the benchmark suites included with eTran and Linux-Homa. To make the workload descriptions self-contained, an RPC is a request followed by a response, while a single-stream workload uses one communication stream. Many-to-one means that several clients send to one server; one-to-many reverses that direction. P50 and P99 are the median and 99th-percentile values, and Kops/Mops denote thousands or millions of operations per second.
+
+| Paper metric | What we measured                                                                                                                                                                                                                          | Why it matters                                                                                    |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| 1            | A single client sends a 32B request to one server and waits for the echoed response before sending the next request. The round-trip time (RTT) P50 and P99 are recorded.                                                                  | Measures the latency cost of the data path for a small request with no request-level concurrency. |
+| 2            | A single client sends 1MB messages to one server back-to-back over a single stream. Sustained throughput is recorded.                                                                                                                     | Tests bulk data movement without contention from concurrent flows.                                |
+| 3-4          | 500KB messages are sent concurrently either from 7 clients to 1 server (many-to-one) or from 1 client to 7 servers (one-to-many). Aggregate throughput is recorded.                                                                       | Tests scaling when several flows share a receiver or a sender.                                    |
+| 5-6          | 32B RPCs are sent either from 7 clients to 1 server or from 1 client to 7 servers, with multiple requests outstanding. The aggregate RPC rate is recorded in Kops or Mops.                                                                | Measures small-message processing capacity and contention.                                        |
+| 7-12         | Ten nodes act as both clients and servers in the W2-W5 all-to-all workloads. W2 and W3 emphasize short messages, while W4 and W5 emphasize large messages at higher offered loads. Overall and shortest-10% RTT P50 and P99 are recorded. | Tests incast, contention, and tail behavior under mixed message sizes.                            |
+| 13-14        | A TCP client and server exchange 1KB or 2KB messages with 64 requests outstanding. Stream throughput is recorded.                                                                                                                         | Measures eTran-DCTCP and Linux-DCTCP on a sustained stream workload.                              |
+| 15           | Five clients maintain 200 persistent TCP connections each, for 1,000 connections in total. Each connection sends closed-loop 64B requests with one request outstanding. Aggregate request rate is recorded.                               | Tests connection management and small-request processing at high concurrency.                     |
+| 18           | Five clients run a key-value workload over 100,000 keys, with 32B keys, 64B values, a 90% GET and 10% SET mix, Zipf skew 0.9, and multiple connections and outstanding requests. Throughput is recorded.                                  | Tests the transports in an application-style workload.                                            |
+| 19-20        | A single client runs the same key-value workload with one thread, one connection, and one request outstanding. Request-latency P50 and P99 are recorded.                                                                                  | Measures application responsiveness without saturation from competing requests.                   |
+| 21-22        | CPU cycles per request are measured for the TCP and Homa benchmark processes using the corresponding CPU-cycle workloads.                                                                                                                 | Estimates the processing cost of each transport path.                                             |
+
+The comparison answers two related questions. For Homa, it isolates the effect of the eTran data path by comparing eTran-Homa with the same protocol implemented in the Linux kernel. For DCTCP, it tests whether eTran's AF_XDP and eBPF path changes the behavior of a conventional TCP transport relative to Linux-DCTCP. The metric suite combines latency, throughput, scalability, tail latency, application workloads, and CPU cost so that the comparison does not depend on a single performance measure.
 
 # 3. Environment Setup
 
