@@ -1,30 +1,27 @@
 # Replicating: "eTran: extensible kernel transport with eBPF"
 
-**Team Members:**  
-Pierluigi Grossi, 10618314@polimi.it;  
-Matteo Franken, 10831046@polimi.it;  
-Lorenzo Chiroli, 10797603@polimi.it
+**Team Members:**
 
----
+- Pierluigi Grossi, 10618314@polimi.it.
+- Matteo Franken, 10831046@polimi.it.
+- Lorenzo Chiroli, 10797603@polimi.it.
 
-**Source Paper:**
-Zhongjie Chen, Qingkai Meng, ChonLam Lao, Yifan Liu, Fengyuan Ren, Minlan Yu,
+**Source Paper:** Zhongjie Chen, Qingkai Meng, ChonLam Lao, Yifan Liu, Fengyuan Ren, Minlan Yu,
 and Yang Zhou: eTran: Extensible Kernel Transport with eBPF. In "22nd USENIX
 Symposium on Networked Systems Design and Implementation (NSDI 25)", pages
 407-425, Philadelphia, PA, 2025. USENIX Association.
 
-Paper link: https://www.usenix.org/conference/nsdi25/presentation/chen-zhongjie
+_Paper URL_: <https://www.usenix.org/conference/nsdi25/presentation/chen-zhongjie>
 
+**Project:** The repository contains the CloudLab profile used to set up the cluster, Ansible 
+playbooks for configuring it, and runbooks documenting the procedures used to run the experiments 
+and collect measurements.
 
-**Project:**
-Project repository: https://github.com/lorenzo-cmyk/PF_NC_2025_26. The repository
-contains the CloudLab profile used to set up the cluster, Ansible playbooks
-for configuring it, and runbooks documenting the procedures used to run the
-experiments and collect measurements.
+_Project URL_: <https://github.com/lorenzo-cmyk/PF_NC_2025_26>
 
 ---
 
-# 1. Introduction
+# **1. Introduction**
 
 ### **1. Motivation and Intuition**
 
@@ -33,8 +30,6 @@ The central contribution of eTran is a safe and extensible kernel transport fram
 * **Limits of the native kernel stack (Linux TCP):** Modifying the Linux transport stack takes years. DCTCP took four years to enter the mainline kernel, MPTCP took almost a decade, and Homa, proposed in 2018, remains an external module. The traditional data path also has high costs due to socket and file system abstractions, heavy `sk_buff` structures, and repeated context switches for I/O system calls.
 * **Risks of Kernel Bypass (User Space/DPDK):** Moving transport into user space enables fast evolution, but it removes kernel isolation and protection. A bug, crash, or malicious behavior in an application can alter acknowledgments, sequence numbers, or timers. It can also compromise the correctness of other tenants and prevent the kernel from enforcing global security policies, firewalling, and telemetry.
 * **The eBPF solution and recent enablers:** eTran keeps transport state inside protected eBPF maps in the kernel, separate from application memory, with program safety checked by the statically verified eBPF verifier. Recent eBPF advances in the Linux kernel make this approach feasible today: `dynptr` in version 5.19, dynamic memory allocation in version 6.1, `rbtree` support in version 6.3, and new `kfuncs` allow eBPF programs to manage complex data structures that were previously impractical.
-
----
 
 ### **2. Limits of Standard eBPF and Linux Kernel Patches**
 
@@ -45,11 +40,9 @@ Native eBPF/XDP was designed for ingress inspection and lacks the capabilities r
 3. **New `BPF_MAP_TYPE_PKT_QUEUE` Map and BPF Timers (Pacing):** This map stores pointers to deferred packets such as `xdp_frame` objects. It is integrated with BPF timers extended with two asynchronous execution modes: per-CPU execution through `NETTX_SOFTIRQ` for rate-based pacing, as used by TCP, and a global kernel thread for complex global scheduling, such as Homa credit management.
 4. **Out-of-Order Completion Support for AF_XDP:** AF_XDP natively requires buffers to be recycled in order. Since eBPF pacing holds and delays some packets, the authors modified AF_XDP memory management and the network card driver, including approximately 20 lines of code in the Mellanox `mlx5` driver, to support asynchronous and out-of-order buffer completion and recycling.
 
----
-
 ### **3. Practical Architecture and Execution Flow**
 
-eTran is organized into three components with clearly separated responsibilities:
+eTran is organized into three components:
 
 * **Control Path Daemon (Root User-Space Process):** A centralized manager with `root` privileges creates AF_XDP sockets, allocates UMEM, loads eBPF programs into the kernel, and manages connection handshakes such as the TCP SYN and ACK exchange. It runs floating-point congestion control by updating eBPF maps through shared `BPF_F_MMAPABLE` memory and handles retransmissions after severe timeouts.
 * **Kernel Data Path (eBPF):** The transport engine runs inside the kernel. It performs high-speed I/O in the softirq and NAPI contexts while keeping connection state, timers, windows, and sequence numbers in protected BPF maps.
@@ -60,16 +53,16 @@ eTran is organized into three components with clearly separated responsibilities
 2. **Data Transfer (Direct Data Plane - Daemon Bypassed):** During `write()`, the application places data in the AF_XDP ring buffers. The `XDP_EGRESS` hook reads the data, applies headers and pacing through the BPF maps, and transmits the packets. During `read()`, the `XDP` hook validates incoming packets, updates BPF state, and places them in the AF_XDP receive ring, where the application reads them directly.
 3. **In Case of an Application Crash:** The user library is isolated and cannot access the BPF state in the kernel. If the application crashes, the kernel's network state remains protected and intact.
 
----
-
 ### **4. Case Studies and Validation**
 
-eTran is not a single protocol but an extension framework that provides in-kernel primitives, including `XDP_EGRESS`, `XDP_GEN`, `PKT_QUEUE`, and BPF timers, for programming transport logic such as congestion control, pacing, and loss recovery.
+As discussed, eTran is not a single protocol but an extension framework that provides in-kernel primitives, including `XDP_EGRESS`, `XDP_GEN`, `PKT_QUEUE`, and BPF timers, for programming transport logic such as congestion control, pacing, and loss recovery.
 
 To demonstrate the feasibility of the platform, the authors implemented two proof-of-concept transports that cover opposite datacenter transport paradigms:
 
 1. **TCP with DCTCP:** Built on classic **POSIX-like stream APIs**, it implements a connection-oriented, sender-driven transport with rate-based pacing.
 2. **Homa:** In addition to POSIX-like APIs, the authors developed **RPC message APIs** and implemented Homa as a connectionless, receiver-driven transport with credit- and priority-based scheduling using SRPT.
+
+---
 
 # 2. Selected Result
 
