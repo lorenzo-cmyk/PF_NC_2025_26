@@ -1,20 +1,26 @@
-# Replicating: "The Title of Paper You Selected From The List"
+# Replicating: "eTran: extensible kernel transport with eBPF"
 
 **Team Members:**  
-FirstName LastName1 (email address);  
-FirstName LastName2 (email address);  
-FirstName LastName3 (email address)
+Pierluigi Grossi, 10618314@polimi.it;  
+Matteo Franken, 10831046@polimi.it;  
+Lorenzo Chiroli, 10797603@polimi.it
 
 ---
 
 **Source Paper:**
-Author1, Author2, ...: Title of the paper you selected. In "official name of
-the conference/journal,... ", "Publisher".
+Zhongjie Chen, Qingkai Meng, ChonLam Lao, Yifan Liu, Fengyuan Ren, Minlan Yu,
+and Yang Zhou: eTran: Extensible Kernel Transport with eBPF. In "22nd USENIX
+Symposium on Networked Systems Design and Implementation (NSDI 25)", pages
+407-425, Philadelphia, PA, 2025. USENIX Association.
+
+Paper link: https://www.usenix.org/conference/nsdi25/presentation/chen-zhongjie
 
 
 **Project:**
-a link to your repository in which you have a reproducible version of the
-experiments you did (only if you wrote new scripts, changed the code, etc.)
+Project repository: https://github.com/lorenzo-cmyk/PF_NC_2025_26. The repository
+contains the CloudLab profile used to set up the cluster, Ansible playbooks
+for configuring it, and runbooks documenting the procedures used to run the
+experiments and collect measurements.
 
 ---
 
