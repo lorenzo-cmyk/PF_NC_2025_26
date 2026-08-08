@@ -66,15 +66,9 @@ To demonstrate the feasibility of the platform, the authors implemented two proo
 
 ---
 
-# **2. Selected Result**
+# **2. Selected Results**
 
-The selected result is a cross-stack comparison between the transport implementations shipped with eTran and their Linux counterparts. We compare eTran-Homa with Linux-Homa, and eTran-DCTCP with Linux-DCTCP.
-
-The eTran-Homa and Linux-Homa comparison uses the same Homa protocol with two different data paths. eTran runs Homa through AF_XDP, eBPF, and the eTran user-space library, while Linux-Homa uses the Homa kernel module. The eTran-DCTCP and Linux-DCTCP comparison follows the same idea for TCP with DCTCP: eTran uses its eBPF transport path, while Linux-DCTCP uses the standard Linux TCP stack with `tcp_dctcp` and ECN.
-
-This comparison tests whether eTran can retain the protection of kernel networking while achieving the performance expected from a specialized transport implementation. Comparing the same protocol across the two stacks also limits the effect of protocol design when interpreting the results.
-
-The evaluation uses the benchmark suites included with eTran and Linux-Homa. To make the workload descriptions self-contained, an RPC is a request followed by a response, while a single-stream workload uses one communication stream. Many-to-one means that several clients send to one server; one-to-many reverses that direction. P50 and P99 are the median and 99th-percentile values, and Kops/Mops denote thousands or millions of operations per second.
+The selected results compare the eTran transports with their Linux counterparts: eTran-Homa vs. Linux-Homa (the Homa kernel module) and eTran-DCTCP vs. Linux-DCTCP (standard Linux TCP with `tcp_dctcp` and ECN). Each pair implements the same protocol, so protocol design cannot explain differences between the two stacks; any gap reflects the data path alone (eTran's eBPF machinery versus the kernel's).
 
 | Paper metric | What we measured                                                                                                                                                                                                                          | Why it matters                                                                                    |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
