@@ -21,9 +21,9 @@ _Project URL_: <https://github.com/lorenzo-cmyk/PF_NC_2025_26>
 
 ---
 
-# **1. Introduction**
+## **1. Introduction**
 
-### **1. Motivation and Intuition**
+#### **1. Motivation and Intuition**
 
 The central contribution of eTran is a safe and extensible kernel transport framework that combines the protection of kernel networking with the development speed and performance techniques usually associated with user-space transports.
 
@@ -31,7 +31,7 @@ The central contribution of eTran is a safe and extensible kernel transport fram
 * **Risks of Kernel Bypass (User Space/DPDK):** Moving transport into user space enables fast evolution, but it removes kernel isolation and protection. A bug, crash, or malicious behavior in an application can alter acknowledgments, sequence numbers, or timers. It can also compromise the correctness of other tenants and prevent the kernel from enforcing global security policies, firewalling, and telemetry.
 * **The eBPF solution and recent enablers:** eTran keeps transport state inside protected eBPF maps in the kernel, separate from application memory, with program safety checked by the statically verified eBPF verifier. Recent eBPF advances in the Linux kernel make this approach feasible today: `dynptr` in version 5.19, dynamic memory allocation in version 6.1, `rbtree` support in version 6.3, and new `kfuncs` allow eBPF programs to manage complex data structures that were previously impractical.
 
-### **2. Limits of Standard eBPF and Linux Kernel Patches**
+#### **2. Limits of Standard eBPF and Linux Kernel Patches**
 
 Native eBPF/XDP was designed for ingress inspection and lacks the capabilities required by a complete transport stack. To overcome these limitations, the authors extended the Linux kernel with approximately 2,500 lines of C code and introduced four main changes:
 
@@ -40,7 +40,7 @@ Native eBPF/XDP was designed for ingress inspection and lacks the capabilities r
 3. **New `BPF_MAP_TYPE_PKT_QUEUE` Map and BPF Timers (Pacing):** This map stores pointers to deferred packets such as `xdp_frame` objects. It is integrated with BPF timers extended with two asynchronous execution modes: per-CPU execution through `NETTX_SOFTIRQ` for rate-based pacing, as used by TCP, and a global kernel thread for complex global scheduling, such as Homa credit management.
 4. **Out-of-Order Completion Support for AF_XDP:** AF_XDP natively requires buffers to be recycled in order. Since eBPF pacing holds and delays some packets, the authors modified AF_XDP memory management and the network card driver, including approximately 20 lines of code in the Mellanox `mlx5` driver, to support asynchronous and out-of-order buffer completion and recycling.
 
-### **3. Practical Architecture and Execution Flow**
+#### **3. Practical Architecture and Execution Flow**
 
 eTran is organized into three components:
 
@@ -48,14 +48,14 @@ eTran is organized into three components:
 * **Kernel Data Path (eBPF):** The transport engine runs inside the kernel. It performs high-speed I/O in the softirq and NAPI contexts while keeping connection state, timers, windows, and sequence numbers in protected BPF maps.
 * **User Transport Library (`LD_PRELOAD` or RPC API):** An unprivileged library that is the application's only way onto the eBPF data path, since direct access requires `root` privileges and queue multiplexing and eTran deliberately does not trust applications with it. The library exposes a **Virtual AF_XDP Socket** and translates application calls into operations on shared AF_XDP ring buffers, so the application never touches kernel state directly. It can be linked at compile time, exposing both an RPC API and a new Socket API, or injected dynamically into an existing binary via `LD_PRELOAD`; the latter is possible because the Socket API is POSIX-compliant, making it a drop-in replacement for the standard socket interface.
 
-![eTran Architecture](Figures/eTran_Architecture.png)
+<img src="Figures/eTran_Architecture.png" alt="eTran Architecture" style="height: 5cm; width: auto;">
 
-#### **Practical Connection Lifecycle:**
+##### **Practical Connection Lifecycle:**
 1. **Setup and Handshake (Control Plane):** The application triggers a connection request: for example, it calls `socket()` or `connect()` through the Socket API, or it uses the RPC API directly. Either way, the library intercepts or translates the call and sends a request through **LRPC** to the root daemon. All privileged setup happens here, on the daemon's side: it creates the AF_XDP socket (which requires `root`/`CAP_NET_RAW`), allocates the UMEM as shared memory (`/dev/shm`), binds the socket to a NIC queue, and loads the eBPF programs. It then passes the already-configured socket file descriptor to the application through a Unix socket (`SCM_RIGHTS` fd passing), so that the unprivileged application can `mmap` the rings and the UMEM pages into its address space. The daemon also manages the network SYN/ACK handshake and installs the control information in the kernel's eBPF maps.
 2. **Data Transfer (Direct Data Plane - Daemon Bypassed):** After setup, the daemon is out of the data path. During `write()`, the application copies data into the shared UMEM pages and submits descriptors on the TX ring. The `XDP_EGRESS` hook validates each packet (checking the `umem_id` against the pool registered for the connection), applies headers and pacing through the BPF maps, and transmits the packets. During `read()`, the `XDP` hook validates incoming packets, updates BPF state, and places them in the AF_XDP receive ring, where the application reads them directly.
 3. **Trust Boundary and Crash Isolation:** The application only ever touches its own UMEM buffers and ring descriptors. It cannot load eBPF programs, read the stateful BPF maps (windows, sequence numbers, timers), or access other tenants' data. If the application crashes or misbehaves, it can at worst corrupt its own buffers: the kernel's network state remains protected and intact.
 
-### **4. Case Studies and Validation**
+#### **4. Case Studies and Validation**
 
 As discussed, eTran is not a single protocol but an extension framework: its in-kernel primitives (`XDP_EGRESS`, `XDP_GEN`, `PKT_QUEUE`, BPF timers) span the full transport stack, from header generation to congestion control, flow control, and scheduling.
 
@@ -64,9 +64,8 @@ To demonstrate the feasibility of the platform, the authors implemented two proo
 1. **TCP with DCTCP:** Built on classic **POSIX-like stream APIs**, it implements a connection-oriented, sender-driven transport with rate-based pacing.
 2. **Homa:** In addition to POSIX-like APIs, the authors developed **RPC message APIs** and implemented Homa as a connectionless, receiver-driven transport with credit- and priority-based scheduling using SRPT.
 
----
 
-# **2. Selected Results**
+## **2. Selected Results**
 
 The selected results compare the eTran transports with their Linux counterparts: eTran-Homa vs. Linux-Homa (the Homa kernel module) and eTran-DCTCP vs. Linux-DCTCP (standard Linux TCP with `tcp_dctcp` and ECN). Each pair implements the same protocol, so protocol design cannot explain differences between the two stacks; any gap reflects the data path alone (eTran's eBPF machinery versus the kernel's).
 
@@ -83,11 +82,11 @@ The selected results compare the eTran transports with their Linux counterparts:
 | 19-20        | A single client runs the same `flexkvs` key-value workload as metric 18, with one thread, one connection, and one request outstanding. Request-latency P50 and P99 are recorded.                                                                                                                                                                                                                       | Measures application responsiveness without saturation from competing requests.                   |
 | 21-22        | CPU cycles per request are measured on the benchmark processes: metric 21 reuses the TCP `epoll` benchmark of metric 13 (1KB messages), and metric 22 reuses the Homa `cp_node` benchmark of metric 1 (32B RPCs).                                                                                                                                                                                      | Estimates the processing cost of each transport path.                                             |
 
-# **3. Environment Setup**
+## **3. Environment Setup**
 
 The reproduction was conducted on a ten-node allocation at the CloudLab Utah site, the same testbed used for the original experiments. The evaluation therefore used the same `xl170` node type, Mellanox 2410 switch fabric, and official paper artifact as the authors, with all nodes connected directly to a single switch. The hardware, software, and runtime configuration are described below.
 
-### **Hardware Environment**
+#### **Hardware Environment**
 
 The cluster was provisioned at the CloudLab Utah site and contained ten physical nodes connected through the same rack switch:
 
@@ -98,7 +97,7 @@ The cluster was provisioned at the CloudLab Utah site and contained ten physical
 * **Network Card:** Mellanox ConnectX-4 Lx 25 GbE NIC using the `mlx5` driver.
 * **Network Switch:** Mellanox 2410 25 GbE rack switch.
 
-### **Software Environment**
+#### **Software Environment**
 
 The software environment was built from the official projects:
 
@@ -112,7 +111,7 @@ The software environment was built from the official projects:
   * `HomaModule` (`https://github.com/PlatformLab/HomaModule`): `9edb9589`
 * **Compiler and libraries:** GCC/G++ 11.4.0, Clang/LLVM, `libbpf`, `libelf`, and the other dependencies installed from the Ubuntu 22.04 repositories, using the versions shipped by the distribution rather than pinned by the project.
 
-### **Configuration Parameters**
+#### **Configuration Parameters**
 
 The main system and network parameters were kept consistent across the benchmarks:
 
@@ -123,23 +122,23 @@ The main system and network parameters were kept consistent across the benchmark
 * **Network preparation:** Static ARP entries were installed for all nodes because eTran does not implement ARP in its data path; `/etc/hosts` entries let each node reference the others by hostname without DNS, as the benchmarks expect. The benchmark interface was `ens1f1np1`, with addresses in the `192.168.6.0/24` network.
 * **Stack-specific parameters:** The Linux-DCTCP baseline used `tcp_dctcp` as the congestion-control algorithm, enabled ECN with `net.ipv4.tcp_ecn=1`, and enabled TCP timestamps. The Linux-Homa evaluation installed the `homa` qdisc on the benchmark interface and set `net.homa.max_gso_size=100000` and `net.homa.hijack_tcp=0`.
 
-# **4. Experiment Results**
+## **4. Experiment Results**
 
 This section reports only the values measured on the reproduction cluster. The comparison with the paper's reported results is deferred to Section 5.
 
-### **4.1 Execution Procedure**
+#### **4.1 Execution Procedure**
 
 The same basic procedure was used for each workload: stale processes and eTran shared-memory objects were cleaned up, the stack-specific setup was re-applied after each reboot, servers and the eTran `micro_kernel` were started in `screen` sessions, clients were launched with workload-specific timeouts and a 0.3 second stagger for multi-client tests, and the output was collected and read for the relevant metric.
 
 Run durations were workload-specific: 15 seconds for single-stream and small-message tests, 30 seconds for concurrent Homa tests, 20 to 45 seconds for TCP key-value tests, and 5, 10, 20, or 30 seconds for the all-to-all workloads depending on the offered load.
 
-### **4.2 Measurement Method**
+#### **4.2 Measurement Method**
 
 The benchmark programs reported the primary measurements directly. RTT distributions came from client output, with P50 and P99 denoting the median and 99th percentile of the observed RTTs. Throughput was read in Gbps from client output or server logs, RPC rates and `flexkvs` throughput were reported as aggregate operations per second, and `perf stat` collected the cycles and instructions used for the CPU-cycle metrics.
 
 Ranges reflect either different configurations or run-to-run variation, and peak/steady-state pairs are separate phases or load points; no confidence intervals were computed.
 
-### **4.3 Homa Measurements**
+#### **4.3 Homa Measurements**
 
 Metrics 1-6 report latency, throughput, and RPC rate for eTran-Homa and Linux-Homa.
 
@@ -165,7 +164,7 @@ Bold marks the better value; where P50 and P99 favor different stacks, each perc
 
 The W4 and W5 eTran runs used a 20 Gbps offered load that exceeded the measured drain rate, so queues grew continuously and these rows describe the overloaded local system rather than steady-state latency.
 
-### **4.4 DCTCP Measurements**
+#### **4.4 DCTCP Measurements**
 
 Metrics 13-15 and 18-20 report streaming throughput, connection scalability, key-value workload performance, and request latency for eTran-DCTCP and Linux-DCTCP.
 
@@ -180,7 +179,7 @@ Metrics 13-15 and 18-20 report streaming throughput, connection scalability, key
 
 Linux-DCTCP is reported as a range because its values varied 2-3x between runs.
 
-### **4.5 CPU Measurements**
+#### **4.5 CPU Measurements**
 
 Metrics 21-22 estimate the per-request CPU cost of the TCP and Homa transports, collected with `perf stat`.
 
@@ -191,17 +190,17 @@ Metrics 21-22 estimate the per-request CPU cost of the TCP and Homa transports, 
 
 For metric 22, the raw eTran figure was ~1357 kcycles including AF_XDP busy-polling, and the workloads differed (1MB for eTran, 32B for Linux-Homa).
 
-### **4.6 Key Takeaways**
+#### **4.6 Key Takeaways**
 
 **eTran strengths (DCTCP):** eTran-DCTCP outperformed Linux-DCTCP on every measured TCP workload: streaming throughput, persistent connections, request latency, and the key-value application.
 
 **eTran weaknesses (some Homa workloads):** Concurrent fan-in throughput was well below both Linux stacks, the shortest-10% messages in all-to-all traffic saw much higher latency, and the offered load of the W4/W5 workloads could not be drained, leaving those runs overloaded rather than in steady state. Its single-stream RPC latency, however, was the lowest of the measured set.
 
-# **5. Reproducibility Assessment of the Paper**
+## **5. Reproducibility Assessment of the Paper**
 
 The local measurements do not reproduce the reported evaluation as a whole: a few results are close, especially single-stream latency and some TCP workloads, but the main Homa scalability results show substantial gaps, and several experiments could not be reproduced with the available artifact. The comparison below uses the measurements from Section 4 and the values reported by the authors.
 
-### **5.1 Homa Results**
+#### **5.1 Homa Results**
 
 | Metric | Workload                                   | Measured (eTran-Homa) | Paper (eTran) | Delta |
 | ------ | ------------------------------------------ | --------------------: | ------------: | ----: |
@@ -228,7 +227,7 @@ Metrics 7-12 cover the all-to-all workloads; the paper frames the comparison as 
 | W5, shortest-10% P50 slowdown |   0.004x |     3.9x |    below |
 | W5, shortest-10% P99 slowdown |   0.002x |     2.9x |    below |
 
-### **5.2 TCP and DCTCP Results**
+#### **5.2 TCP and DCTCP Results**
 
 The TCP results were more favorable, but they still do not establish a complete reproduction of the reported evaluation:
 
@@ -243,7 +242,7 @@ The TCP results were more favorable, but they still do not establish a complete 
 
 Ratios are shown because the paper reports ratios for these metrics; they are eTran-DCTCP over Linux-DCTCP.
 
-### **5.3 Reproducibility Assessment**
+#### **5.3 Reproducibility Assessment**
 
 **Reproduction outcome:** The reproduction failed in the broad sense: it did not reproduce the complete performance profile. The failure was not uniform: single-stream latency, several TCP workloads, and the low-load key-value measurements were close to or better than the reported values, but eTran-Homa did not sustain the expected performance under concurrent fan-in, small-message RPC load, or high offered load. The evaluation was also incomplete: the artifact lacks the short-lived TCP benchmark (metrics 16-17) and the standalone BPF programs for the XDP microbenchmarks, and the W4/W5 eTran runs were overloaded.
 
@@ -255,7 +254,7 @@ Ratios are shown because the paper reports ratios for these metrics; they are eT
 
 **Overall:** The artifact was usable for building and running the principal workloads, but not for reproducing the entire evaluation; the reproduction is therefore partial and, for the paper's overall claims, unsuccessful.
 
-# 6. Further Exploration
+## 6. Further Exploration
 
 In this project you are required to also explore a research question of your own. Either:
 
@@ -265,7 +264,7 @@ In this project you are required to also explore a research question of your own
 Discuss which approach you take, and what you explored. Explain what was your
 motivation and importance of your question.
 
-## 6.1. Methodology and Result
+### 6.1. Methodology and Result
 
 Report the experiment you designed for answering the question and share the
 result you got.
@@ -277,14 +276,13 @@ Include:
 - What did you discover?
 
 
-# 7. Conclusion
+## 7. Conclusion
 
 Conclude the report by mentioning the takeaways of experiments you did
 
 
----
 
-# Appendix
+## Appendix
 
 You are asked to write this report using Markdown. You can find a cheat sheet
 of Markdown syntax at this [link](https://rust-lang.github.io/mdBook/format/markdown.html).
