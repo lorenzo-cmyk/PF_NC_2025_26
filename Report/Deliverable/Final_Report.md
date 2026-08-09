@@ -193,23 +193,9 @@ For metric 22, the raw eTran figure was ~1357 kcycles including AF_XDP busy-poll
 
 ### **4.6 Key Takeaways**
 
-The local measurements reveal a workload-dependent performance profile for eTran.
+**eTran strengths (DCTCP):** eTran-DCTCP outperformed Linux-DCTCP on every measured TCP workload: streaming throughput, persistent connections, request latency, and the key-value application.
 
-**Where eTran Performs Well:**
-
-* **TCP throughput and scalability:** In the measured configurations, eTran-DCTCP achieved higher throughput and request rates than Linux-DCTCP. It reached 12.29 Gbps for 2KB streaming messages, 655 Kops in steady state with 1,000 persistent connections, and 0.73 Mops on the `flexkvs` workload.
-* **Application performance:** eTran-DCTCP recorded 14 us P50 and 16 us P99 latency for the low-load `flexkvs` workload. Linux-DCTCP recorded 17 us P50 and 24 us P99 under the corresponding idle configuration. Its separate 36 us P50 value was measured with 320 requests in flight.
-* **Single-stream RPC latency:** eTran-Homa recorded the lowest unloaded 32B single-stream RTT in the measured set, with 12.59 us P50 and 14.85 us P99, compared with 15.26 us P50 for Linux-Homa.
-
-**Where eTran Struggles:**
-
-* **Concurrent fan-in throughput:** In the 500KB, 7-client-to-1-server workload, eTran-Homa reached about 12.8-12.9 Gbps, while Linux-Homa and Linux-DCTCP reached about 23 Gbps. The measured bottleneck was serialized `XDP_GEN` grant dispatch rather than server parallelism or the number of server threads.
-* **Shortest-10% latency in all-to-all traffic:** In W2 and W3, Linux-Homa recorded lower P50 latency for the shortest 10% of messages, at 19-20 us, while eTran-Homa recorded 91-110 us.
-* **Overloaded queue buildup:** At the 20 Gbps offered load used for W4 and W5, eTran-Homa could not drain traffic as quickly as it arrived. The resulting queues grew continuously, and P99 RTT reached 13713 us in W4 and 130044 us in W5. These values describe an overloaded local system rather than steady-state behavior.
-
-**CPU Measurements:**
-
-The Homa CPU measurement separates total busy-polling cost from active processing. eTran-Homa consumed about 1357 kcycles per request when the full busy-polling interval was counted, but about 5 kcycles when only active processing was considered. For metric 21, the measured process-scoped costs were about 2.93 kcycles per request for eTran-DCTCP on the server and about 7.4 kcycles for Linux-DCTCP on the client. The measurement scopes differ, so these values should be treated as indicative rather than as a direct reduction from one implementation to the other.
+**eTran weaknesses (some Homa workloads):** Concurrent fan-in throughput was well below both Linux stacks, the shortest-10% messages in all-to-all traffic saw much higher latency, and the offered load of the W4/W5 workloads could not be drained, leaving those runs overloaded rather than in steady state. Its single-stream RPC latency, however, was the lowest of the measured set.
 
 # 5. Reproducibility Assessment of the Paper
 
