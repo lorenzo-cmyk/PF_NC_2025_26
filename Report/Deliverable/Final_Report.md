@@ -85,7 +85,7 @@ The selected results compare the eTran transports with their Linux counterparts:
 
 # **3. Environment Setup**
 
-The reproduction was conducted on the same physical CloudLab cluster used for the original experiments. The evaluation therefore used the same `xl170` node type, rack, Mellanox 2410 switch fabric, and official paper artifact as the authors. The hardware, software, and runtime configuration are described below.
+The reproduction was conducted on a ten-node allocation at the CloudLab Utah site, the same testbed used for the original experiments. The evaluation therefore used the same `xl170` node type, Mellanox 2410 switch fabric, and official paper artifact as the authors, with all nodes connected directly to a single switch. The hardware, software, and runtime configuration are described below.
 
 ### **Hardware Environment**
 
@@ -95,50 +95,33 @@ The cluster was provisioned at the CloudLab Utah site and contained ten physical
 * **CPU:** Single-socket Intel Xeon E5-2640 v4 at 2.40 GHz, with 10 physical cores and 20 logical CPUs per node.
 * **Memory:** 64 GB ECC DDR4 RAM per node.
 * **Storage:** A 16 GB CloudLab blockstore mounted at `/mydata` on each node.
-* **Network Card:** Mellanox ConnectX-4 Lx 25 GbE NIC using the `mlx5` driver and the `ens1f1np1` interface.
+* **Network Card:** Mellanox ConnectX-4 Lx 25 GbE NIC using the `mlx5` driver.
 * **Network Switch:** Mellanox 2410 25 GbE rack switch.
 
 ### **Software Environment**
 
-The evaluation used the official repositories and the corresponding stack-specific software:
+The software environment was built from the official projects:
 
 * **Operating System:** Ubuntu 22.04 LTS.
-* **eTran kernel:** Custom `6.6.0-eTran+` kernel built from `eTran-linux`, including the eTran patches for `XDP_EGRESS`, `XDP_GEN`, `BPF_MAP_TYPE_PKT_QUEUE`, and AF_XDP out-of-order buffer completion.
-* **eTran implementation:** `eTran`, including `micro_kernel`, `libetran.so`, the Homa application, and the TCP applications.
-* **Linux-Homa kernel:** Linux-Homa was validated with the HomaModule kernel, built from Linux `v6.17.8` with the Homa module. This kernel is different from the custom `6.6.0-eTran+` kernel used by eTran.
-* **Linux-DCTCP baseline:** The DCTCP setup reuses the eTran system setup and custom kernel, then builds the HomaModule `cp_node` utility and configures standard Linux TCP with DCTCP and ECN.
-* **Linux-Homa baseline:** `PlatformLab/HomaModule`, including its `cp_node` benchmark utility and Homa kernel module.
-* **Repositories:**
-  * `https://github.com/eTran-NSDI25/eTran`
-  * `https://github.com/eTran-NSDI25/eTran-linux`
-  * `https://github.com/PlatformLab/HomaModule`
-* **Recorded artifact revisions:**
-  * `eTran`: `f26ef186bde0f9b3b899712e44112de47b7d5a65`, `Update README.md`, 2025-04-28.
-  * `eTran-linux`: `3e96097421b41d3d9f2935d3405e956076c9d823`, `fix bug`, 2024-10-30.
-  * `HomaModule`: `9edb95896ba874dcb64064a51099ae4b38c84617`, HEAD of `main` on 2026-07-09, `Add more material to INSTALL.md`, 2026-07-01.
-* **Compiler and libraries:** GCC/G++ 11.4.0, Clang/LLVM, `libbpf`, `libelf`, and the other dependencies installed by the Ansible setup playbooks.
+* **eTran:** the custom `6.6.0-eTran+` kernel (with the `XDP_EGRESS`, `XDP_GEN`, `BPF_MAP_TYPE_PKT_QUEUE`, and AF_XDP out-of-order completion patches), `micro_kernel`, `libetran.so`, and the Homa and TCP applications.
+* **Linux-Homa:** `PlatformLab/HomaModule`, providing the `cp_node` benchmark utility and the Homa kernel module, run on a separate Linux `v6.17.8` kernel.
+* **Linux-DCTCP:** the eTran kernel with standard Linux TCP configured for DCTCP and ECN, using the HomaModule `cp_node` utility.
+* **Repositories (pinned revisions):**
+  * `eTran` (`https://github.com/eTran-NSDI25/eTran`): `f26ef186`
+  * `eTran-linux` (`https://github.com/eTran-NSDI25/eTran-linux`): `3e960974`
+  * `HomaModule` (`https://github.com/PlatformLab/HomaModule`): `9edb9589`
+* **Compiler and libraries:** GCC/G++ 11.4.0, Clang/LLVM, `libbpf`, `libelf`, and the other dependencies installed from the Ubuntu 22.04 repositories, using the versions shipped by the distribution rather than pinned by the project.
 
 ### **Configuration Parameters**
 
-The main system and network parameters were kept consistent across the benchmark stacks:
+The main system and network parameters were kept consistent across the benchmarks:
 
-* **Switch configuration:** The Mellanox 2410 used its default ECN configuration, including a 70 KB marking threshold. Direct access to the Mellanox switch was confirmed to be unavailable through CloudLab, so its default configuration could not be changed.
-* **MTU:** The MTU was kept at 1500 bytes because the switch does not support jumbo frames for this experiment.
-* **NIC coalescing:** Adaptive RX and TX coalescing were disabled. RX coalescing was set to zero microseconds with one frame, and TX coalescing was set to 5 microseconds.
-* **Flow control:** NIC RX and TX flow control were disabled.
-* **Offloads:** GRO and TSO remained enabled. Disabling either offload was found to hurt performance on this hardware.
-* **Kernel tuning:** SMT was enabled, kernel mitigations were disabled, CPU C-states were disabled, and PCIe ASPM was disabled. The `network-throughput` profile from `tuned` was enabled.
-* **eTran queues and CPU placement:** The eTran `micro_kernel` used its default 20 NIC queues. Its control loop was internally pinned to CPU 19 through `CP_CPU`; no external `taskset` was used for the micro-kernel or application threads. For eTran TCP, `ETRAN_NR_APP_THREADS` was set to the application thread count and `ETRAN_NR_NIC_QUEUES` was set to the same value.
-* **DCTCP parameters:** The Linux-DCTCP baseline used `tcp_dctcp` as the congestion-control algorithm, enabled ECN with `net.ipv4.tcp_ecn=1`, and enabled TCP timestamps.
-* **Linux-Homa parameters:** The Homa evaluation installed the `homa` qdisc on `ens1f1np1`, set `net.homa.max_gso_size=100000` and `net.homa.hijack_tcp=0`, and set the CPU governor to `performance`.
-* **Network preparation:** Static ARP entries and `/etc/hosts` entries were installed for all nodes. The benchmark interface was `ens1f1np1`, with addresses in the `192.168.6.0/24` network.
-* **Runtime parameters:** The workload-specific parameters included message size, `--client-max`, `--ports`, `--server-ports`, `--server-nodes`, `--one-way`, `--gbps`, `--both`, and `--id`, as specified by the metric runbooks.
-
-No external dataset was used. The workloads were generated by the benchmark programs, including the W2-W5 Homa workloads and the `flexkvs` key-value workload.
-
-### **Deviations from the Original Setup**
-
-The hardware discrepancy between the paper's `xl170` specification and the provisioned nodes is discussed in Section 5.6. The remaining listed hardware characteristics matched the evaluation environment. The Linux-Homa validation uses the HomaModule Linux `v6.17.8` kernel, while eTran uses the custom `6.6.0-eTran+` kernel. This difference is required by the two stack implementations being compared, rather than being an experimental substitution. The official eTran and HomaModule sources were used, and the benchmark parameters were taken from the metric definitions and runbooks rather than replaced with a separate workload or dataset.
+* **Switch configuration:** The Mellanox 2410 was used with its default configuration, including a 70 KB ECN marking threshold and jumbo frames disabled, so the MTU was kept at 1500 bytes. CloudLab's documentation states that the switch is not exposed as a managed component, so its configuration could not be changed.
+* **NIC tuning:** RX and TX flow control were disabled, adaptive coalescing was turned off, and GRO and TSO remained enabled (disabling the offloads was found to hurt performance on this hardware).
+* **Kernel tuning:** Hyper-Threading (SMT) was enabled, kernel mitigations were disabled, CPU C-states were disabled, and PCIe ASPM was disabled. The `network-throughput` profile from `tuned` was enabled.
+* **eTran queues and CPU placement:** The `micro_kernel` used its default 20 NIC queues, with the control loop internally pinned to CPU 19 via `CP_CPU` and no external `taskset`. For eTran TCP, `ETRAN_NR_APP_THREADS` and `ETRAN_NR_NIC_QUEUES` were both set to the application thread count.
+* **Network preparation:** Static ARP entries were installed for all nodes because eTran does not implement ARP in its data path; `/etc/hosts` entries let each node reference the others by hostname without DNS, as the benchmarks expect. The benchmark interface was `ens1f1np1`, with addresses in the `192.168.6.0/24` network.
+* **Stack-specific parameters:** The Linux-DCTCP baseline used `tcp_dctcp` as the congestion-control algorithm, enabled ECN with `net.ipv4.tcp_ecn=1`, and enabled TCP timestamps. The Linux-Homa evaluation installed the `homa` qdisc on the benchmark interface and set `net.homa.max_gso_size=100000` and `net.homa.hijack_tcp=0`.
 
 # **4. Experiment Result**
 
@@ -293,11 +276,11 @@ HomaModule commit `8321cde` still initializes the `.sendpage` field in both `str
 
 The same commit uses `kthread_complete_and_exit`, which is available by Linux 5.17. Together with the pre-6.5 socket APIs and the commit's `linux_6.0` branch, this identifies the source as a Linux 6.0-era implementation and, in any case, rules out Linux 6.5 and later. Later HomaModule fixes, including commit `df0daa5a9`, updated the ioctl and `sendpage` interfaces, but introduced `#include <net/rps.h>`. That header is absent from Linux 6.6, 6.7, and 6.8, and is available starting with Linux 6.9. The later fix therefore does not provide a Linux 6.6 solution either.
 
-The reproduction used a functional compatibility path instead: the Ansible pipeline built mainline Linux `v6.17.8` and HomaModule `main` at commit `9edb95896ba874dcb64064a51099ae4b38c84617`. This allowed Linux-Homa to run, but it is not the Linux 6.6 and `8321cde` combination stated for the baseline. The contradiction is therefore a reproducibility problem in the published setup, not merely a performance difference observed during the experiments.
+The reproduction used a functional compatibility path instead: the Ansible pipeline built mainline Linux `v6.17.8` and HomaModule `main` at commit `9edb9589`. This allowed Linux-Homa to run, but it is not the Linux 6.6 and `8321cde` combination stated for the baseline. The contradiction is therefore a reproducibility problem in the published setup, not merely a performance difference observed during the experiments.
 
 ### **5.6 Hardware Specification Discrepancy**
 
-The paper describes the `xl170` instance as having two CPUs with 10 cores each. The provisioned `xl170` nodes instead had one Intel Xeon E5-2640 v4 CPU with 10 physical cores and 20 logical CPUs with SMT enabled. The other listed hardware characteristics matched the evaluation environment, including memory, the ConnectX-4 Lx NIC, the 25 GbE network, and the Mellanox 2410 switch.
+The paper describes the `xl170` instance as having two CPUs with 10 cores each. The provisioned `xl170` nodes instead had one Intel Xeon E5-2640 v4 CPU with 10 physical cores and 20 logical CPUs with Hyper-Threading enabled. The other listed hardware characteristics matched the evaluation environment, including memory, the ConnectX-4 Lx NIC, the 25 GbE network, and the Mellanox 2410 switch.
 
 This is a minor hardware discrepancy, but it reduces the available physical-core capacity compared with the hardware configuration described in the paper. It may affect highly concurrent workloads, although it does not account for the separate kernel compatibility problem or the missing reproduction instructions.
 
