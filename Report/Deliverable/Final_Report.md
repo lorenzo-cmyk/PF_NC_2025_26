@@ -167,23 +167,29 @@ The W4 and W5 eTran runs used a 20 Gbps offered load that exceeded the measured 
 
 ### **4.4 TCP and DCTCP Measurements**
 
-The TCP measurements covered streaming throughput, persistent connections, a key-value workload, request latency, and CPU cost.
+Metrics 13-15 and 18-20 report streaming throughput, connection scalability, key-value workload performance, and request latency for eTran-DCTCP and Linux-DCTCP.
 
-| Metric | Workload                                            |                                                                      eTran-DCTCP |                        Linux-DCTCP |
-| ------ | --------------------------------------------------- | -------------------------------------------------------------------------------: | ---------------------------------: |
-| 13     | 1KB streaming throughput, 64 outstanding            | 1x1: 7.19 Gbps / 878 Kops; 1x5: 12.1 Gbps / 1474 Kops; 5x5: 7.55 Gbps / 922 Kops |        1.8-2.8 Gbps / 222-346 Kops |
-| 14     | 2KB streaming throughput, 64 outstanding            |                                                            12.29 Gbps / 750 Kops |        1.8-4.6 Gbps / 111-283 Kops |
-| 15     | 1K persistent connections, 64B closed-loop requests |                                      about 1129 Kops peak; about 655 Kops steady |                     about 234 Kops |
-| 18     | `flexkvs` throughput                                |                                                                  about 0.73 Mops |                   about 0.278 Mops |
-| 19     | `flexkvs` request latency P50                       |                                                                            14 us | 17 us idle; 36 us at 320 in-flight |
-| 20     | `flexkvs` request latency P99                       |                                                                            16 us |                         24 us idle |
-| 21     | TCP CPU cycles per request                          |                                                  about 2.93 kcycles, server-side |     about 7.4 kcycles, client-side |
+| Metric | Workload                                                             |     eTran-DCTCP |       Linux-DCTCP |
+| ------ | -------------------------------------------------------------------- | --------------: | ----------------: |
+| 13     | TCP stream, 1KB messages, 64 outstanding (Gbps / Kops)               |  **7.19 / 878** | 1.8-2.8 / 222-346 |
+| 14     | TCP stream, 2KB messages, 64 outstanding (Gbps / Kops)               | **12.29 / 750** | 1.8-4.6 / 111-283 |
+| 15     | 1,000 persistent TCP connections, 64B requests, one in flight (Kops) |        **~655** |              ~234 |
+| 18     | `flexkvs` key-value workload, 100K keys, 90% GET / 10% SET (Kops)    |        **~730** |              ~278 |
+| 19     | `flexkvs` request latency P50, single client, one in flight (us)     |          **14** |                17 |
+| 20     | `flexkvs` request latency P99, single client, one in flight (us)     |          **16** |                24 |
 
-The Homa CPU measurement was recorded separately because it uses the Homa benchmark process rather than the TCP application:
+Linux-DCTCP is reported as a range because its values varied 2-3x between runs.
 
-| Metric | Workload               |                                                                             eTran-Homa |         Linux-Homa |
-| ------ | ---------------------- | -------------------------------------------------------------------------------------: | -----------------: |
-| 22     | CPU cycles per request | about 1357 kcycles including AF_XDP busy-polling; about 5 kcycles of active processing | about 18.6 kcycles |
+### **4.5 CPU Measurements**
+
+Metrics 21-22 estimate the per-request CPU cost of the TCP and Homa transports, collected with `perf stat`.
+
+| Metric | Workload                                                 |     eTran | Linux |
+| ------ | -------------------------------------------------------- | --------: | ----: |
+| 21     | TCP CPU cycles per request, 1KB stream (kcycles)         | **~2.93** |  ~7.4 |
+| 22     | Homa CPU cycles per request, active processing (kcycles) |    **~5** | ~18.6 |
+
+For metric 22, the raw eTran figure was ~1357 kcycles including AF_XDP busy-polling, and the workloads differed (1MB for eTran, 32B for Linux-Homa).
 
 ### **4.5 Correctness Checks and Debugging**
 
