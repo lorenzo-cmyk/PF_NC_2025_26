@@ -197,38 +197,37 @@ For metric 22, the raw eTran figure was ~1357 kcycles including AF_XDP busy-poll
 
 **eTran weaknesses (some Homa workloads):** Concurrent fan-in throughput was well below both Linux stacks, the shortest-10% messages in all-to-all traffic saw much higher latency, and the offered load of the W4/W5 workloads could not be drained, leaving those runs overloaded rather than in steady state. Its single-stream RPC latency, however, was the lowest of the measured set.
 
-# 5. Reproducibility Assessment of the Paper
+# **5. Reproducibility Assessment of the Paper**
 
-The local measurements do not reproduce the reported evaluation as a whole. A few isolated results are close to the reported values, especially single-stream latency and some TCP application workloads, but the main Homa scalability results show substantial gaps. Several experiments also could not be reproduced with the available artifact. The comparison below uses the measurements from Section 4 and the values reported by the authors.
+The local measurements do not reproduce the reported evaluation as a whole: a few results are close, especially single-stream latency and some TCP workloads, but the main Homa scalability results show substantial gaps, and several experiments could not be reproduced with the available artifact. The comparison below uses the measurements from Section 4 and the values reported by the authors.
 
 ### **5.1 Homa Results**
 
-The largest differences appear in concurrent Homa workloads:
+| Metric | Workload                                   | Measured (eTran-Homa) | Paper (eTran) | Delta |
+| ------ | ------------------------------------------ | --------------------: | ------------: | ----: |
+| 1      | 32B RTT P50 (us)                           |                 12.59 |          11.8 | -6.7% |
+| 2      | 1MB throughput (Gbps)                      |                  16.6 |          17.7 | -6.2% |
+| 3      | 500KB, 7 clients to 1 server (Gbps)        |                 ~12.8 |          23.0 |  -44% |
+| 4      | 500KB, 1 client to 7 servers (Gbps)        |                 ~19.5 |          22.7 |  -14% |
+| 5      | 32B RPC rate, 7 clients to 1 server (Kops) |                  ~927 |          2900 |  -68% |
+| 6      | 32B RPC rate, 1 client to 7 servers (Kops) |                 ~1120 |          3300 |  -66% |
+| 22     | Homa CPU per request, active (kcycles)     |                    ~5 |          5.48 |   +9% |
 
-| Metric                                 | Measured: eTran-Homa / Linux-Homa | Reported: eTran / Linux-Homa |
-| -------------------------------------- | --------------------------------: | ---------------------------: |
-| 1, 32B RTT P50 (us)                    |                     12.59 / 15.26 |                  11.8 / 15.6 |
-| 2, 1MB throughput (Gbps)               |                16.6 / about 10-11 |                  17.7 / 14.5 |
-| 3, 500KB, 7 clients to 1 server (Gbps) |             about 12.8 / about 23 |                  23.0 / 23.1 |
-| 4, 500KB, 1 client to 7 servers (Gbps) |           about 19.5 / about 23.1 |                  22.7 / 22.9 |
-| 5, 32B RPC rate, 7 clients to 1 server |   about 927 Kops / about 1.1 Mops |          2.9 Mops / 1.7 Mops |
-| 6, 32B RPC rate, 1 client to 7 servers |  about 1120 Kops / about 0.9 Mops |          3.3 Mops / 1.8 Mops |
-
-Metric 1 was close for both implementations, and eTran-Homa metric 2 also reached a similar throughput. The concurrent metrics were different: eTran-Homa reached only about 12.8 Gbps in metric 3 compared with the roughly 23 Gbps measured for both Linux-Homa and Linux-DCTCP, and its RPC rates in metrics 5 and 6 were substantially lower than the reported values. The local Linux-Homa metric 2 result also varied between about 10-11 Gbps and 17.9 Gbps across sessions, so that workload was not stable on the reproduction cluster.
-
-For W2 and W3, the local overall P99 RTTs were 1344 us and 1428 us for eTran-Homa, compared with 9453 us and 9511 us for Linux-Homa. However, the shortest-10% P50 values were 91 us and 110 us for eTran-Homa, compared with 19 us and 20 us for Linux-Homa. The W4 and W5 eTran runs were overloaded at the offered 20 Gbps load and therefore do not provide steady-state comparisons.
+Delta is relative to the paper value: positive means better, negative means worse.
 
 ### **5.2 TCP and DCTCP Results**
 
 The TCP results were more favorable, but they still do not establish a complete reproduction of the reported evaluation:
 
-* **Metric 13:** The local eTran-DCTCP to Linux-DCTCP throughput ratios were about 3.95x for 1x1, 3.98x for 1x5, and 2.79x for 5x5, compared with the reported 4.8x ratio.
-* **Metric 14:** eTran-DCTCP reached 12.29 Gbps, while Linux-DCTCP ranged from 1.8 to 4.6 Gbps.
-* **Metric 15:** The local steady-state ratio was about 2.8x, compared with the reported 2.26x target.
-* **Metric 18:** The local `flexkvs` ratio was about 2.6x, within the reported local comparison range of 2.4-4.8x.
-* **Metrics 19-20:** eTran-DCTCP measured 14 us P50 and 16 us P99, while Linux-DCTCP measured 17 us P50 and 24 us P99 in the idle configuration. The corresponding reported eTran values were 17.2 us P50 and 27.5 us P99.
-* **Metric 21:** The local CPU values cannot be compared directly with the reported component totals because the local measurements were process-scoped and used different processes for eTran-DCTCP and Linux-DCTCP.
-* **Metric 22:** The active eTran-Homa processing cost was about 5 kcycles, close to the reported active-processing value, while the raw eTran value was about 1357 kcycles because of AF_XDP busy-polling. The Linux-Homa value was about 18.6 kcycles.
+| Metric | Workload                             |      Measured |    Paper |          Delta |
+| ------ | ------------------------------------ | ------------: | -------: | -------------: |
+| 13     | 1KB stream, 64 outstanding (ratio)   |         3.95x |     4.8x |           -18% |
+| 15     | 1,000 persistent connections (ratio) |         ~2.8x |    2.26x |           +24% |
+| 18     | `flexkvs` throughput (ratio)         |         ~2.6x | 2.4-4.8x |       in range |
+| 19     | `flexkvs` latency P50 (us)           |            14 |     17.2 |           +19% |
+| 20     | `flexkvs` latency P99 (us)           |            16 |     27.5 |           +42% |
+
+Ratios are shown because the paper reports ratios for these metrics; they are eTran-DCTCP over Linux-DCTCP.
 
 ### **5.3 Reproducibility Assessment**
 
