@@ -23,15 +23,8 @@ html {
   line-height: 1.15;
   -webkit-text-size-adjust: 100%;
 }
-body {
-  margin: 0;
-}
 main {
   display: block;
-}
-h1 {
-  font-size: 2em;
-  margin: 0.67em 0;
 }
 hr {
   box-sizing: content-box;
@@ -195,10 +188,12 @@ body {
   -webkit-font-smoothing: antialiased;
   background: #fff !important;
   color: #000 !important;
-  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
   font-size: 10pt;
   line-height: 1.5;
   margin: 0 auto;
+  padding: 0;
+  text-align: left;
   text-rendering: optimizeLegibility;
 }
 p,
@@ -222,7 +217,9 @@ h4,
 h5,
 h6 {
   color: #000;
-  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family:
+    "Open Sans", "Arial Black", "Arial Bold", "Helvetica Neue", Helvetica,
+    sans-serif;
   font-weight: 700;
   line-height: 1.2;
   margin-bottom: 0.75rem;
@@ -230,6 +227,8 @@ h6 {
 }
 h1 {
   font-size: 18pt;
+  letter-spacing: -1px;
+  text-align: center;
 }
 h2 {
   font-size: 16pt;
@@ -266,7 +265,6 @@ td {
 td,
 th {
   padding: 8px 16px;
-  page-break-inside: auto;
   text-align: left;
 }
 code,
@@ -304,7 +302,6 @@ pre kbd {
 blockquote {
   border: 0;
   border-left: 5px solid #bbb;
-  margin-left: 1px;
   padding: 12px 1.5rem;
 }
 [dir="rtl"] blockquote {
@@ -363,7 +360,9 @@ hr,
 ul,
 ol,
 a,
-tr {
+tr,
+td,
+th {
   page-break-inside: auto;
 }
 h2,
@@ -398,9 +397,6 @@ img {
 pre {
   white-space: pre-wrap !important;
   word-wrap: break-word;
-}
-body {
-  padding: 0;
 }
 a[href^="http"]:after,
 a[href^="ftp"]:after {
@@ -443,36 +439,12 @@ acronym[title].no-reformat:after {
 .no-reformat a:after {
   content: "";
 }
-h1,
-h2,
-h3,
-h4,
-h5,
-h6 {
-  font-family:
-    "Open Sans", "Arial Black", "Arial Bold", "Helvetica Neue", Helvetica,
-    sans-serif;
-}
-body {
-  font-family: "Open Sans", "Helvetica Neue", Helvetica, arial, sans-serif;
-  text-align: left;
-}
-h1 {
-  font-weight: 700;
-  letter-spacing: -1px;
-  text-align: center;
-}
 h2 {
   letter-spacing: -1px;
 }
-h2,
-h3,
-h4,
-h5 {
-  color: #262626;
-}
 pre,
-code {
+code,
+kbd {
   border: 0;
 }
 pre,
