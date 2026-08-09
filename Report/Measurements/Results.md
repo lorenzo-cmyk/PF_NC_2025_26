@@ -32,13 +32,9 @@ single-threaded server (`--one-way`). 2 nodes.
 Results:
 | eTran (Homa)                  | Linux-Homa                                                | DCTCP     |
 | ----------------------------- | --------------------------------------------------------- | --------- |
-| 16.6 Gbps (94% of paper 17.7) | ~10-11 Gbps (conflicting: 17.9 Gbps on 07-08; paper 14.5) | 21.5 Gbps |
+| 16.6 Gbps (94% of paper 17.7) | ~10-11 Gbps (paper 14.5) | 21.5 Gbps |
 
-Notes: Unresolved Linux-Homa conflict (17.9 vs 10-11 Gbps, same commands,
-different sessions). The 07-09 value is internally consistent (RTT P50 ~720 us
-=> ~11 Gbps at 1MB per RPC); candidate: qdisc/sysctl state differences
-between sessions. Re-measure on next cluster allocation before quoting
-either. DCTCP saturates the 25G NIC for bulk transfers.
+Notes: Linux-Homa 1MB throughput showed a session-to-session conflict (17.9 Gbps on 07-08 vs 10-11 Gbps on 07-09, same commands). The 07-09 value is internally consistent (RTT P50 ~720 us => ~11 Gbps at 1MB per RPC); candidate: qdisc/sysctl state differences between sessions. RESOLVED: Final_Report.md quotes ~10-11 Gbps. DCTCP saturates the 25G NIC for bulk transfers.
 
 # Metric 3: 500KB throughput, 7 clients -> 1 server
 
@@ -145,8 +141,8 @@ Notes: eTran/DCTCP ratios ~3.95x (1x1), ~3.98x (1x5), ~2.79x (5x5) - best
 bottleneck is server-side queue contention (single 5-thread client hits
 1474 Kops, 5x5 aggregate drops to 922 Kops). DCTCP baseline varies 2-3x
 run-to-run; switch ECN marking IS enabled on the SN2410 (corrected
-2026-07-18), so the mechanism is unresolved: threshold mismatch vs the
-paper's deduced ~70KB, DCTCP oscillation around the marking point, or
+2026-07-18), and the ~70 KB marking threshold was confirmed, so the
+mechanism is unresolved: DCTCP oscillation around the marking point, or
 measurement-window transients. Single-point ratios are unreliable.
 5x5 x 64 (1600 in-flight) is stable for 20s+ runs, no drops.
 

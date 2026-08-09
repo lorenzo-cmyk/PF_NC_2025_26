@@ -117,9 +117,12 @@ done
 wait
 
 # 6. Collect results.
+# Server-stats grep is case-sensitive and stack-specific: eTran's cp_node
+# prints "Servers:", HomaModule's cp_node prints "servers:".
+SRV_GREP=Servers:   # eTran; set to "servers:" for Linux-Homa runs
 for i in 1 2 3 ...; do grep "Clients:" /tmp/client_$i.out | tail -1; done
 ssh node0 "sudo screen -S server -X hardcopy /tmp/srv.log; \
-  grep 'Servers:' /tmp/srv.log | tail -3"
+  grep \"$SRV_GREP\" /tmp/srv.log | tail -3"
 ```
 
 - Restart micro_kernel + clean shm between metrics/workloads - stale BPF
@@ -157,7 +160,8 @@ ssh nodeN "sudo screen -ls micro_kernel; sudo pgrep -a micro_kernel"
 # collect server output without killing it
 ssh node0 "sudo screen -S server -X hardcopy /tmp/srv.log; cat /tmp/srv.log"
 
-# latest stats lines (scrollback may have truncated old output)
+# latest stats lines (scrollback may have truncated old output);
+# grep is case-sensitive: "Servers:" (eTran) vs "servers:" (Linux-Homa)
 ssh node0 "sudo screen -S server -X hardcopy /tmp/srv.log; \
   grep 'Servers:' /tmp/srv.log | tail -5"
 

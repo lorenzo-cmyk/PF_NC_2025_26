@@ -1,0 +1,7 @@
+---
+- name: Homa full system setup
+  import_playbook: setup/site.yml
+- name: Homa full system tuning
+  import_playbook: tuning/site.yml
+- name: Homa full evaluation prep
+  import_playbook: evaluation/site.yml
