@@ -165,7 +165,7 @@ Bold marks the better value; where P50 and P99 favor different stacks, each perc
 
 The W4 and W5 eTran runs used a 20 Gbps offered load that exceeded the measured drain rate, so queues grew continuously and these rows describe the overloaded local system rather than steady-state latency.
 
-### **4.4 TCP and DCTCP Measurements**
+### **4.4 DCTCP Measurements**
 
 Metrics 13-15 and 18-20 report streaming throughput, connection scalability, key-value workload performance, and request latency for eTran-DCTCP and Linux-DCTCP.
 
@@ -190,12 +190,6 @@ Metrics 21-22 estimate the per-request CPU cost of the TCP and Homa transports, 
 | 22     | Homa CPU cycles per request, active processing (kcycles) |    **~5** | ~18.6 |
 
 For metric 22, the raw eTran figure was ~1357 kcycles including AF_XDP busy-polling, and the workloads differed (1MB for eTran, 32B for Linux-Homa).
-
-### **4.5 Correctness Checks and Debugging**
-
-Correctness was checked before collecting measurements. Network preparation verified IP forwarding, permanent ARP entries, `/etc/hosts`, hostname resolution, ping reachability, MTU, NIC coalescing, and flow control. Stack-specific checks verified the running kernel, required binaries, loaded Homa module, eTran objects, DCTCP sysctls, and Homa qdisc. Server and client logs were also checked for completed operations and nonzero throughput before values were retained.
-
-Several operational issues affected the measurement process. Stale eTran shared-memory objects and BPF state caused runs to stall with zero completions, so shared memory was cleaned between metrics and `micro_kernel` was restarted. A killed `micro_kernel` could leave an XDP program attached to the NIC; detaching XDP before restarting fixed the subsequent silent startup failure. Running `micro_kernel` or the server under `timeout` caused premature termination, so both were kept in `screen` sessions and only clients were given timeouts. The `pkill -f micro_kernel` pattern could also terminate its own wrapper, so cleanup used exact process names and explicit PIDs instead.
 
 ### **4.6 Key Takeaways**
 
