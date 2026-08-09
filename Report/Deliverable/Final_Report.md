@@ -141,27 +141,29 @@ Ranges reflect either different configurations or run-to-run variation, and peak
 
 ### **4.3 Homa Measurements**
 
-The Homa measurements covered small-message latency, bulk throughput, concurrent fan-in and fan-out, RPC rate, and ten-node all-to-all traffic.
+Metrics 1-6 report latency, throughput, and RPC rate for eTran-Homa and Linux-Homa.
 
-| Metric | Workload                              |       eTran-Homa |          Linux-Homa |     Linux-DCTCP |
-| ------ | ------------------------------------- | ---------------: | ------------------: | --------------: |
-| 1      | 32B single-stream RTT, P50 / P99 (us) |    12.59 / 14.85 | 15.26 / about 25-35 |     22.7 / 26.4 |
-| 2      | 1MB single-stream throughput (Gbps)   |             16.6 |         about 10-11 |            21.5 |
-| 3      | 500KB, 7 clients to 1 server (Gbps)   | about 12.78-12.9 |            about 23 |            23.5 |
-| 4      | 500KB, 1 client to 7 servers (Gbps)   |       about 19.5 |          about 23.1 |            23.5 |
-| 5      | 32B RPC rate, 7 clients to 1 server   |   about 927 Kops |      about 1.1 Mops |  about 866 Kops |
-| 6      | 32B RPC rate, 1 client to 7 servers   |  about 1120 Kops |      about 0.9 Mops | about 1082 Kops |
+| Metric | Workload                                   |        eTran-Homa |     Linux-Homa |
+| ------ | ------------------------------------------ | ----------------: | -------------: |
+| 1      | 32B single-stream RTT, P50 / P99 (us)      | **12.59 / 14.85** | 15.26 / ~25-35 |
+| 2      | 1MB single-stream throughput (Gbps)        |          **16.6** |         ~10-11 |
+| 3      | 500KB, 7 clients to 1 server (Gbps)        |       ~12.78-12.9 |        **~23** |
+| 4      | 500KB, 1 client to 7 servers (Gbps)        |             ~19.5 |      **~23.1** |
+| 5      | 32B RPC rate, 7 clients to 1 server (Kops) |              ~927 |      **~1100** |
+| 6      | 32B RPC rate, 1 client to 7 servers (Kops) |         **~1120** |           ~900 |
 
-For the ten-node all-to-all workloads, each node acted as both a client and a server. The table reports RTT P50/P99 in microseconds. The `shortest-10%` columns contain the same percentiles after retaining the shortest 10 percent of the observed messages.
+These rows correspond to metrics 7-12 and report RTT P50/P99 in microseconds. Because each workload mixes short and large messages, the `shortest-10%` columns compute the same percentiles over only the 10% smallest messages, isolating the latency seen by small, latency-sensitive messages instead of hiding it behind large transfers.
 
 | Workload | eTran-Homa overall | Linux-Homa overall | eTran-Homa shortest-10% | Linux-Homa shortest-10% |
 | -------- | -----------------: | -----------------: | ----------------------: | ----------------------: |
-| W2       |         109 / 1344 |          94 / 9453 |                91 / 118 |                 19 / 21 |
-| W3       |         115 / 1428 |         100 / 9511 |              110 / 1462 |                 20 / 22 |
-| W4       |       3068 / 13713 |       128 / 224000 |            2848 / 12604 |                 22 / 24 |
-| W5       |     18007 / 130044 |      1135 / 404000 |           14530 / 48026 |                 61 / 84 |
+| W2       |     109 / **1344** |      **94** / 9453 |                91 / 118 |             **19 / 21** |
+| W3       |     115 / **1428** |     **100** / 9511 |              110 / 1462 |             **20 / 22** |
+| W4       |   3068 / **13713** |   **128** / 224000 |            2848 / 12604 |             **22 / 24** |
+| W5       | 18007 / **130044** |  **1135** / 404000 |           14530 / 48026 |             **61 / 84** |
 
-The W4 and W5 eTran runs were performed at 20 Gbps offered load. Their observed queues continued to grow because the offered load exceeded the measured drain rate. These rows are therefore retained as measurements of the overloaded local system rather than as steady-state latency measurements.
+Bold marks the better value; where P50 and P99 favor different stacks, each percentile is bolded independently.
+
+The W4 and W5 eTran runs used a 20 Gbps offered load that exceeded the measured drain rate, so queues grew continuously and these rows describe the overloaded local system rather than steady-state latency.
 
 ### **4.4 TCP and DCTCP Measurements**
 
