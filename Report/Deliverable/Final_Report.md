@@ -123,33 +123,21 @@ The main system and network parameters were kept consistent across the benchmark
 * **Network preparation:** Static ARP entries were installed for all nodes because eTran does not implement ARP in its data path; `/etc/hosts` entries let each node reference the others by hostname without DNS, as the benchmarks expect. The benchmark interface was `ens1f1np1`, with addresses in the `192.168.6.0/24` network.
 * **Stack-specific parameters:** The Linux-DCTCP baseline used `tcp_dctcp` as the congestion-control algorithm, enabled ECN with `net.ipv4.tcp_ecn=1`, and enabled TCP timestamps. The Linux-Homa evaluation installed the `homa` qdisc on the benchmark interface and set `net.homa.max_gso_size=100000` and `net.homa.hijack_tcp=0`.
 
-# **4. Experiment Result**
+# **4. Experiment Results**
 
-The measurements compare the local executions of eTran-Homa, Linux-Homa, eTran-DCTCP, and Linux-DCTCP. This section reports only values obtained from the benchmark runs on the reproduction cluster.
+This section reports only the values measured on the reproduction cluster. The comparison with the paper's reported results is deferred to Section 5.
 
 ### **4.1 Execution Procedure**
 
-The same basic procedure was used for each workload:
+The same basic procedure was used for each workload: stale processes and eTran shared-memory objects were cleaned up, the stack-specific setup was re-applied after each reboot, servers and the eTran `micro_kernel` were started in `screen` sessions, clients were launched with workload-specific timeouts and a 0.3 second stagger for multi-client tests, and the output was collected and read for the relevant metric.
 
-1. Stale benchmark processes were terminated by PID, and stale XDP programs were detached from the NIC when necessary. The process name was matched exactly to avoid killing the command used to perform the cleanup.
-2. For eTran workloads, `/dev/shm/BufferPool_*`, `/dev/shm/UMEM_*`, and `/dev/shm/LRPC_*` were removed before changing metrics or workloads.
-3. The stack-specific setup and evaluation playbooks were applied after reboot. These steps restored the network interface, ARP entries, hostname resolution, MTU, NIC tuning, Homa qdisc, and relevant sysctl values.
-4. eTran `micro_kernel` instances and benchmark servers were started in `screen` sessions so that they retained a controlling terminal and continued running after the SSH command returned. Clients were launched with workload-specific timeouts and a 0.3 second stagger for multi-client tests.
-5. Client output and server `screen` logs were collected after each run. The benchmark output was then parsed for RTT, throughput, RPC rate, latency percentiles, or CPU counters, depending on the metric.
-
-The run durations were workload-specific. Single-stream and small-message tests generally used 15 second client runs, concurrent Homa tests used 30 seconds, TCP key-value tests used 20 to 45 seconds, and the all-to-all workloads used run times of 5, 10, 20, or 30 seconds depending on the offered load.
+Run durations were workload-specific: 15 seconds for single-stream and small-message tests, 30 seconds for concurrent Homa tests, 20 to 45 seconds for TCP key-value tests, and 5, 10, 20, or 30 seconds for the all-to-all workloads depending on the offered load.
 
 ### **4.2 Measurement Method**
 
-The benchmark programs reported the primary measurements directly:
+The benchmark programs reported the primary measurements directly. RTT distributions came from client output, with P50 and P99 denoting the median and 99th percentile of the observed RTTs. Throughput was read in Gbps from client output or server logs, RPC rates and `flexkvs` throughput were reported as aggregate operations per second, and `perf stat` collected the cycles and instructions used for the CPU-cycle metrics.
 
-* **Latency:** RTT distributions were collected from client output or from the all-to-all `dump_times` files. P50 and P99 denote the median and 99th percentile of the observed RTTs.
-* **Throughput:** Stream and bulk-transfer throughput was read in Gbps from client output or server logs, depending on the traffic direction.
-* **RPC rate:** Small-message workloads reported aggregate operations in Kops or Mops.
-* **Application performance:** The `flexkvs` benchmark reported operations per second and request-latency percentiles.
-* **CPU cost:** `perf stat` collected cycles and instructions for the CPU-cycle workloads. Cycles per request were computed from the total cycles, request rate, and active measurement time.
-
-Each metric and configuration was run three times. Unless otherwise noted, the reported value is the arithmetic mean across the three runs. For latency metrics, P50 and P99 were computed from each run's per-request samples and then averaged across runs. Different workload configurations, such as `1x1`, `1x5`, and `5x5`, are reported separately. No confidence intervals or cross-run statistical model was applied. Where a row reports a range or a peak/steady-state pair, the entries represent separate configurations or operating points rather than confidence intervals or repeated-run variation.
+Ranges reflect either different configurations or run-to-run variation, and peak/steady-state pairs are separate phases or load points; no confidence intervals were computed.
 
 ### **4.3 Homa Measurements**
 
