@@ -13,8 +13,8 @@ Symposium on Networked Systems Design and Implementation (NSDI 25)", pages
 
 _Paper URL_: <https://www.usenix.org/conference/nsdi25/presentation/chen-zhongjie>
 
-**Project:** The repository contains the CloudLab profile used to set up the cluster, Ansible 
-playbooks for configuring it, and runbooks documenting the procedures used to run the experiments 
+**Project:** The repository contains the CloudLab profile used to set up the cluster, Ansible
+playbooks for configuring it, and runbooks documenting the procedures used to run the experiments
 and collect measurements.
 
 _Project URL_: <https://github.com/lorenzo-cmyk/PF_NC_2025_26>
@@ -245,33 +245,15 @@ Ratios are shown because the paper reports ratios for these metrics; they are eT
 
 ### **5.3 Reproducibility Assessment**
 
-The reproduction therefore failed in the broad sense: it did not reproduce the complete performance profile across the Homa and TCP metric suite. The failure was not uniform. Single-stream latency, several TCP workloads, and the low-load key-value measurements were close to or better than the reported local values, but eTran-Homa did not sustain the expected performance under concurrent fan-in, small-message RPC load, or high offered load.
+**Reproduction outcome:** The reproduction failed in the broad sense: it did not reproduce the complete performance profile. The failure was not uniform: single-stream latency, several TCP workloads, and the low-load key-value measurements were close to or better than the reported values, but eTran-Homa did not sustain the expected performance under concurrent fan-in, small-message RPC load, or high offered load. The evaluation was also incomplete: the artifact lacks the short-lived TCP benchmark (metrics 16-17) and the standalone BPF programs for the XDP microbenchmarks, and the W4/W5 eTran runs were overloaded.
 
-The evaluation was also incomplete. The public artifact did not contain the short-lived TCP benchmark required for metrics 16-17, and the standalone BPF programs needed for the XDP_EGRESS and XDP_GEN microbenchmarks were unavailable. The Homa CPU comparison used different workloads for eTran-Homa and Linux-Homa, and the W4/W5 eTran measurements were overloaded. These limitations prevent a complete one-to-one reproduction, even though the available benchmark suite was sufficient to expose the main performance bottlenecks in the local system.
+**Artifact documentation:** The authors provide the main benchmark utilities, but no per-metric example commands or scripts; the execution details had to be reconstructed from the documentation and source code, and different choices change the workload that is actually measured. The discrepancy cannot be resolved from the artifact alone; the authors were contacted for clarification, but no response was received.
 
-Overall, the artifact was usable for building and running the principal eTran, Linux-Homa, and Linux-DCTCP workloads, but it was not sufficient to reproduce the entire evaluation. The reproduction should therefore be classified as partial and, for the paper's overall claims, unsuccessful.
+**Baseline compatibility:** The stated Linux-Homa baseline adds a compatibility problem: the paper identifies HomaModule commit `8321cde` (March 2023) with Linux `6.6.0`, a combination that cannot compile unmodified. Commit `8321cde` still uses the `.sendpage` field and the pre-6.5 ioctl signature (`unsigned long arg`), both removed in Linux 6.5; later fixes (commit `df0daa5a9`) introduced `#include <net/rps.h>`, a header absent until Linux 6.9. The reproduction therefore used mainline Linux `v6.17.8` with HomaModule `main` at commit `9edb9589`, a functional path that is not the stated baseline.
 
-### **5.4 Investigation of the Reproduction Gap**
+**Hardware:** The paper describes the `xl170` as having two CPUs with 10 cores each; the provisioned nodes instead had a single Intel Xeon E5-2640 v4 with 10 cores and 20 logical CPUs, so the paper's two-CPU description appears to be a typo.
 
-The authors provide the main benchmark utilities, but one required utility is missing: the public eTran repository does not include the short-lived TCP connection benchmark used for metrics 16-17. The available `epoll_client` supports persistent connections only. The authors also do not provide per-metric example commands or scripts showing how to reproduce the reported measurements. The execution details had to be reconstructed from the available documentation and source code, including the command-line flags, process startup order, client and server roles, runtime, warm-up behavior, and output aggregation. Different choices in any of these details can change the workload that is actually measured, even when the same benchmark utility and message size are used.
-
-As a result, it is possible that some of the local measurements do not exercise exactly the same workloads as the authors' measurements. The discrepancy cannot be resolved from the artifact alone. The authors were contacted for clarification, but no response was received.
-
-### **5.5 Kernel Compatibility of the Stated Linux-Homa Baseline**
-
-The stated Linux-Homa baseline contains a separate compatibility problem. The paper identifies HomaModule commit `8321cde` from March 2023 and Linux `6.6.0`. Source-level analysis shows that this combination cannot compile unmodified.
-
-HomaModule commit `8321cde` still initializes the `.sendpage` field in both `struct proto_ops` and `struct proto`, and defines its Homa ioctl handler with the pre-6.5 signature using `unsigned long arg`. Linux 6.5 removed `sendpage` from both protocol structures and changed the `struct proto` ioctl argument to `int *karg`. The old Homa source therefore does not match the Linux 6.6 kernel APIs.
-
-The same commit uses `kthread_complete_and_exit`, which is available by Linux 5.17. Together with the pre-6.5 socket APIs and the commit's `linux_6.0` branch, this identifies the source as a Linux 6.0-era implementation and, in any case, rules out Linux 6.5 and later. Later HomaModule fixes, including commit `df0daa5a9`, updated the ioctl and `sendpage` interfaces, but introduced `#include <net/rps.h>`. That header is absent from Linux 6.6, 6.7, and 6.8, and is available starting with Linux 6.9. The later fix therefore does not provide a Linux 6.6 solution either.
-
-The reproduction used a functional compatibility path instead: the Ansible pipeline built mainline Linux `v6.17.8` and HomaModule `main` at commit `9edb9589`. This allowed Linux-Homa to run, but it is not the Linux 6.6 and `8321cde` combination stated for the baseline. The contradiction is therefore a reproducibility problem in the published setup, not merely a performance difference observed during the experiments.
-
-### **5.6 Hardware Specification Discrepancy**
-
-The paper describes the `xl170` instance as having two CPUs with 10 cores each. The provisioned `xl170` nodes instead had one Intel Xeon E5-2640 v4 CPU with 10 physical cores and 20 logical CPUs with Hyper-Threading enabled. The other listed hardware characteristics matched the evaluation environment, including memory, the ConnectX-4 Lx NIC, the 25 GbE network, and the Mellanox 2410 switch.
-
-This is a minor hardware discrepancy, but it reduces the available physical-core capacity compared with the hardware configuration described in the paper. It may affect highly concurrent workloads, although it does not account for the separate kernel compatibility problem or the missing reproduction instructions.
+**Overall:** The artifact was usable for building and running the principal workloads, but not for reproducing the entire evaluation; the reproduction is therefore partial and, for the paper's overall claims, unsuccessful.
 
 # 6. Further Exploration
 
