@@ -4,6 +4,13 @@
  * MIT Fabien Sa
  * https://github.com/BafS/Gutenberg
  */ /*! normalize.css v8.0.1 | MIT License | github.com/necolas/normalize.css */
+@font-face {
+  font-family: "Open Sans";
+  font-style: normal;
+  font-weight: 300 800;
+  src: url(https://fonts.gstatic.com/s/opensans/v44/memvYaGs126MiZpBA-UvWbX2vVnXBbObj2OVTS-muw.woff2)
+    format("woff2");
+}
 @page {
   margin: 2cm;
   @bottom-center {
@@ -216,6 +223,7 @@ h5,
 h6 {
   color: #000;
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 700;
   line-height: 1.2;
   margin-bottom: 0.75rem;
   margin-top: 0;
@@ -374,10 +382,13 @@ h5,
 h6 {
   page-break-after: avoid;
 }
-h1 + p,
-h2 + p,
-h3 + p {
-  page-break-before: auto;
+h1 strong,
+h2 strong,
+h3 strong,
+h4 strong,
+h5 strong,
+h6 strong {
+  font-weight: inherit;
 }
 img {
   page-break-after: auto;
@@ -439,7 +450,7 @@ h4,
 h5,
 h6 {
   font-family:
-    "Montserrat", "Arial Black", "Arial Bold", "Helvetica Neue", Helvetica,
+    "Open Sans", "Arial Black", "Arial Bold", "Helvetica Neue", Helvetica,
     sans-serif;
 }
 body {
