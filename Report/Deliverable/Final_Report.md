@@ -215,17 +215,31 @@ The local measurements do not reproduce the reported evaluation as a whole: a fe
 
 Delta is relative to the paper value: positive means better, negative means worse.
 
+Metrics 7-12 cover the all-to-all workloads; the paper frames the comparison as the Linux-Homa over eTran-Homa latency slowdown:
+
+| Workload                      | Measured |    Paper |    Delta |
+| ----------------------------- | -------: | -------: | -------: |
+| W2, P99 slowdown              |     7.0x | 3.9-7.5x | in range |
+| W2, P50 slowdown              |    0.86x | 1.4-3.6x |    below |
+| W3, P99 slowdown              |     6.7x | 3.9-7.5x | in range |
+| W3, P50 slowdown              |    0.87x | 1.4-3.6x |    below |
+| W4, shortest-10% P50 slowdown |   0.008x |     4.1x |    below |
+| W4, shortest-10% P99 slowdown |   0.002x |     4.3x |    below |
+| W5, shortest-10% P50 slowdown |   0.004x |     3.9x |    below |
+| W5, shortest-10% P99 slowdown |   0.002x |     2.9x |    below |
+
 ### **5.2 TCP and DCTCP Results**
 
 The TCP results were more favorable, but they still do not establish a complete reproduction of the reported evaluation:
 
-| Metric | Workload                             |      Measured |    Paper |          Delta |
-| ------ | ------------------------------------ | ------------: | -------: | -------------: |
-| 13     | 1KB stream, 64 outstanding (ratio)   |         3.95x |     4.8x |           -18% |
-| 15     | 1,000 persistent connections (ratio) |         ~2.8x |    2.26x |           +24% |
-| 18     | `flexkvs` throughput (ratio)         |         ~2.6x | 2.4-4.8x |       in range |
-| 19     | `flexkvs` latency P50 (us)           |            14 |     17.2 |           +19% |
-| 20     | `flexkvs` latency P99 (us)           |            16 |     27.5 |           +42% |
+| Metric | Workload                             | Measured |    Paper |    Delta |
+| ------ | ------------------------------------ | -------: | -------: | -------: |
+| 13     | 1KB stream, 64 outstanding (ratio)   |    3.95x |     4.8x |     -18% |
+| 15     | 1,000 persistent connections (ratio) |    ~2.8x |    2.26x |     +24% |
+| 18     | `flexkvs` throughput (ratio)         |    ~2.6x | 2.4-4.8x | in range |
+| 19     | `flexkvs` latency P50 (us)           |       14 |     17.2 |     +19% |
+| 20     | `flexkvs` latency P99 (us)           |       16 |     27.5 |     +42% |
+| 21     | TCP CPU per request (kcycles)        |    ~2.93 |     4.37 |     +33% |
 
 Ratios are shown because the paper reports ratios for these metrics; they are eTran-DCTCP over Linux-DCTCP.
 
