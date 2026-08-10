@@ -4,6 +4,7 @@
 Mirrors md2pdf's pipeline (same markdown extensions) but passes a
 weasyprint FontConfiguration so @font-face rules (Google Fonts) work.
 """
+
 import sys
 from pathlib import Path
 
@@ -25,6 +26,7 @@ EXTENSIONS = [
 
 
 def main() -> int:
+    """Render the markdown report to PDF and print the result."""
     raw = MD.read_text()
     raw_html = markdown(raw, extensions=EXTENSIONS)
 
