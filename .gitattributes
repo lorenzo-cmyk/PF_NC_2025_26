@@ -1,0 +1,8 @@
+# GitHub Linguist settings
+# Treat CSS as generated so it's excluded from language stats
+*.css linguist-generated=true
+
+# Include these in language stats
+*.yml linguist-detectable=true
+*.md linguist-detectable=true
+*.py linguist-detectable=true
