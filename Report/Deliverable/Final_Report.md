@@ -276,9 +276,13 @@ Include:
 - What did you discover?
 
 
+
 ## 7. Conclusion
 
-Conclude the report by mentioning the takeaways of experiments you did
+Overall, our reproduction was only partially successful. We needed to verify whether this gap was due to missing system configurations or if it was an inherent hardware or software bottleneck, and it was hard to reproduce as many things were not explained and some didn't match. While the TCP/DCTCP benchmarks and single-stream latency results closely matched the paper, the Homa scalability and concurrent throughput results fell significantly short.
+
+Our further exploration confirmed that this performance gap in Homa is not due to improper OS tuning. Unlike DPDK workloads, eTran Homa is CPU-bound. Traditional link-bound system optimizations were largely ineffective and sometimes actively harmed performance. The missing 50% throughput for Homa stems from inherent eBPF software bottlenecks,such as the cost of XDP_GEN tail-calls and BPF map contention, which require upstream code optimization, rather than system-level configuration changes.
+
 
 
 
