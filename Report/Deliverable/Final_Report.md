@@ -256,28 +256,28 @@ Ratios are shown because the paper reports ratios for these metrics; they are eT
 
 ## 6. Further Exploration
 
-We chose the first approach: exploring how OS-level tuning impacts the eTran Homa path on the CloudLab cluster[cite: 1]. The standard tuning recipe targets DPDK link-bound workloads, but eTran's Homa path is CPU-bound per RPC[cite: 1]. We aimed to determine if the throughput gap observed during reproduction could be closed through system tuning[cite: 1].
+We chose the first approach: exploring how OS-level tuning impacts the eTran Homa path on the CloudLab cluster. The standard tuning recipe targets DPDK link-bound workloads, but eTran's Homa path is CPU-bound per RPC. We aimed to determine if the throughput gap observed during reproduction could be closed through system tuning.
 
 ### 6.1. Methodology and Result
 
-We evaluated every OS-level setting against the three most important metrics: 32B latency (M1), 500KB throughput (M3), and 32B RPC rate (M5)[cite: 1]. The reference recipe was re-applied item by item, with a full cluster restart between each step to isolate the effects[cite: 1]. 
+We evaluated every OS-level setting against the three most important metrics: 32B latency (M1), 500KB throughput (M3), and 32B RPC rate (M5). The reference recipe was re-applied item by item, with a full cluster restart between each step to isolate the effects. 
 
 **Results Table (Cumulative Application)**
 
 | Change applied | M1 P50 (us) | M3 (Gbps) | M5 (Kops) | Verdict |
 | :--- | :--- | :--- | :--- | :--- |
-| Baseline | 12.59 | 12.78 | 927 | Reference[cite: 1] |
-| `irqbalance` off, `performance` governor, THP=never, `bpf_stats_enabled=0`, `numa_balancing=0`, `ksm/run=0` | ~12.5 | 12.8 | 928 | Neutral / No effect[cite: 1] |
-| `no_turbo=1` | 11.29 | 11.98 | 568 (-39%) | REVERTED (Hurts CPU)[cite: 1] |
-| `gro off`, `tso off` (on top) | n/a | n/a | 568 | REVERTED (Hurts throughput)[cite: 1] |
-| `taskset`, NIC ring 4096, 2M hugepages | 12.5 | 12.8 | 928 | No effect[cite: 1] |
+| Baseline | 12.59 | 12.78 | 927 | Reference |
+| `irqbalance` off, `performance` governor, THP=never, `bpf_stats_enabled=0`, `numa_balancing=0`, `ksm/run=0` | ~12.5 | 12.8 | 928 | Neutral / No effect |
+| `no_turbo=1` | 11.29 | 11.98 | 568 (-39%) | REVERTED (Hurts CPU) |
+| `gro off`, `tso off` (on top) | n/a | n/a | 568 | REVERTED (Hurts throughput) |
+| `taskset`, NIC ring 4096, 2M hugepages | 12.5 | 12.8 | 928 | No effect |
 
 **Key Discoveries:**
-*   **Essential Tunings:** Disabling mitigations, C-states, and ASPM in GRUB is required for sub-15 us latency[cite: 1]. The `performance` CPU governor and keeping SMT (Hyper-Threading) enabled are critical for stable RPC rates[cite: 1].
-*   **Internal Microkernel Tuning:** The eTran root daemon (`micro_kernel`) automatically handles several tuning and setup tasks internally[cite: 1, 2]. It pins its own control loop (e.g., `CP_CPU=19`), pins application threads, and manages 2M hugepages for the AF_XDP UMEM[cite: 1, 2]. This built-in configuration renders manual OS-level interventions like `taskset` redundant and ineffective[cite: 1].
-*   **Detrimental Tunings:** Turning off Intel Turbo or GRO drops the RPC rate by 39%, as eTran Homa relies heavily on maximum clock speed and GRO batching[cite: 1].
-*   **Irrelevant Tunings:** Most standard link-bound tunings (like disabling `irqbalance` or NUMA balancing) are bypassed entirely by eTran's AF_XDP busy-polling[cite: 1].
-*   **The Bottleneck is Software:** The remaining throughput gap compared to the paper is not an OS tuning issue[cite: 1]. It stems from inherent eBPF software bottlenecks (e.g., `XDP_GEN` grant dispatch and BPF map contention) that require upstream code optimization[cite: 1].
+*   **Essential Tunings:** Disabling mitigations, C-states, and ASPM in GRUB is required for sub-15 us latency. The `performance` CPU governor and keeping SMT (Hyper-Threading) enabled are critical for stable RPC rates.
+*   **Internal Microkernel Tuning:** The eTran root daemon (`micro_kernel`) automatically handles several tuning and setup tasks internally. It pins its own control loop (e.g., `CP_CPU=19`), pins application threads, and manages 2M hugepages for the AF_XDP UMEM. This built-in configuration renders manual OS-level interventions like `taskset` redundant and ineffective.
+*   **Detrimental Tunings:** Turning off Intel Turbo or GRO drops the RPC rate by 39%, as eTran Homa relies heavily on maximum clock speed and GRO batching.
+*   **Irrelevant Tunings:** Most standard link-bound tunings (like disabling `irqbalance` or NUMA balancing) are bypassed entirely by eTran's AF_XDP busy-polling.
+*   **The Bottleneck is Software:** The remaining throughput gap compared to the paper is not an OS tuning issue. It stems from inherent eBPF software bottlenecks (e.g., `XDP_GEN` grant dispatch and BPF map contention) that require upstream code optimization.
 
 
 ## 7. Conclusion
