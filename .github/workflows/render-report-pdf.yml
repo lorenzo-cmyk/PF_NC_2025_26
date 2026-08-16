@@ -28,7 +28,7 @@ jobs:
           .venv/bin/python -m pip install -r requirements.txt
 
       - name: Render Markdown report to PDF
-        run: .venv/bin/python render_pdf.py
+        run: ../../.venv/bin/python render_pdf.py
         working-directory: Report/Deliverable
 
       - name: Upload rendered PDF
