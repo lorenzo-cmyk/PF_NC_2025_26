@@ -256,49 +256,38 @@ Ratios are shown because the paper reports ratios for these metrics; they are eT
 
 ## 6. Further Exploration
 
-We chose the first approach: exploring how OS-level tuning impacts the eTran Homa path on the CloudLab cluster. The standard tuning recipe targets DPDK link-bound workloads, but eTran's Homa path is CPU-bound per RPC. We aimed to determine if the throughput gap observed during reproduction could be closed through system tuning.
+We investigated whether OS-level tuning could improve the eTran Homa path on the CloudLab cluster. The standard tuning recipe targets DPDK link-bound workloads, whereas eTran's Homa path appears to be CPU-bound on a per-RPC basis. We therefore evaluated whether system-level changes could reduce the throughput gap observed during reproduction.
 
-### 6.1. Methodology and Result
+### 6.1. Methodology and Results
 
-We evaluated every OS-level setting against the three most important metrics: 32B latency (M1), 500KB throughput (M3), and 32B RPC rate (M5). The reference recipe was re-applied item by item, with a full cluster restart between each step to isolate the effects. 
+We evaluated each configuration using three representative metrics: 32B latency (M1), 500KB throughput (M3), and 32B RPC rate (M5). The settings were applied incrementally, and the cluster was restarted before each measurement to ensure that each configuration was applied consistently.
 
 **Results Table (Cumulative Application)**
 
-| Change applied | M1 P50 (us) | M3 (Gbps) | M5 (Kops) | Verdict |
-| :--- | :--- | :--- | :--- | :--- |
-| Baseline | 12.59 | 12.78 | 927 | Reference |
-| `irqbalance` off, `performance` governor, THP=never, `bpf_stats_enabled=0`, `numa_balancing=0`, `ksm/run=0` | ~12.5 | 12.8 | 928 | Neutral / No effect |
-| `no_turbo=1` | 11.29 | 11.98 | 568 (-39%) | REVERTED (Hurts CPU) |
-| `gro off`, `tso off` (on top) | n/a | n/a | 568 | REVERTED (Hurts throughput) |
-| `taskset`, NIC ring 4096, 2M hugepages | 12.5 | 12.8 | 928 | No effect |
+| Change applied                                                                                              | M1 P50 (us) | M3 (Gbps) | M5 (Kops)  | Verdict                          |
+| :---------------------------------------------------------------------------------------------------------- | :---------- | :-------- | :--------- | :------------------------------- |
+| Baseline                                                                                                    | 12.59       | 12.78     | 927        | Reference                        |
+| `irqbalance` off, `performance` governor, THP=never, `bpf_stats_enabled=0`, `numa_balancing=0`, `ksm/run=0` | ~12.5       | 12.8      | 928        | Neutral / No effect              |
+| `no_turbo=1`                                                                                                | 11.29       | 11.98     | 568 (-39%) | REVERTED (RPC rate decreased)    |
+| `gro off`, `tso off` (on top)                                                                               | n/a         | n/a       | 568        | REVERTED (performance decreased) |
+| `taskset`, NIC ring 4096, 2M hugepages                                                                      | 12.5        | 12.8      | 928        | No effect                        |
 
 **Key Discoveries:**
-*   **Essential Tunings:** Disabling mitigations, C-states, and ASPM in GRUB is required for sub-15 us latency. The `performance` CPU governor and keeping SMT (Hyper-Threading) enabled are critical for stable RPC rates.
+*   **Relevant Baseline Settings:** In our configuration, disabling mitigations, C-states, and ASPM in GRUB was associated with latency below 15 us. The `performance` CPU governor and keeping SMT (Hyper-Threading) enabled were also associated with stable RPC rates.
 *   **Internal Microkernel Tuning:** The eTran root daemon (`micro_kernel`) automatically handles several tuning and setup tasks internally. It pins its own control loop (e.g., `CP_CPU=19`), pins application threads, and manages 2M hugepages for the AF_XDP UMEM. This built-in configuration renders manual OS-level interventions like `taskset` redundant and ineffective.
-*   **Detrimental Tunings:** Turning off Intel Turbo or GRO drops the RPC rate by 39%, as eTran Homa relies heavily on maximum clock speed and GRO batching.
-*   **Irrelevant Tunings:** Most standard link-bound tunings (like disabling `irqbalance` or NUMA balancing) are bypassed entirely by eTran's AF_XDP busy-polling.
-*   **The Bottleneck is Software:** The remaining throughput gap compared to the paper is not an OS tuning issue. It stems from inherent eBPF software bottlenecks (e.g., `XDP_GEN` grant dispatch and BPF map contention) that require upstream code optimization.
+*   **Detrimental Tunings:** Turning off Intel Turbo reduced the RPC rate by 39%, from 927 to 568 Kops. Disabling GRO and TSO also did not improve performance and was therefore reverted.
+*   **Limited Impact of Conventional Tuning:** The tested link-bound tunings, including disabling `irqbalance` and NUMA balancing, did not materially affect the measured workloads.
+*   **Likely Software Bottleneck:** The remaining throughput gap compared to the paper appears to be primarily software-related rather than caused by the tested OS-level settings. Potential contributors include `XDP_GEN` grant dispatch and BPF map contention, although additional profiling would be required to confirm the exact bottleneck.
 
 
 ## 7. Conclusion
 
-Overall, our reproduction of the paper was only partially successful. However, the TCP/DCTCP benchmarks were a major highlight, decisively proving that eTran-DCTCP superior to the native Linux-DCTCP implementation across every measured workload. Conversely, the scalability results of the Homa protocol-especially concurrent throughput and the handling of **high-frequency small RPCs-proved to be significantly lower than reported.**
+Overall, our reproduction of the paper was only partially successful: we were not able to reproduce the complete set of reported measurements, especially for the eTran-Homa scalability results. Nevertheless, the experiments showed that eTran can provide clear benefits, particularly for DCTCP. The TCP/DCTCP benchmarks showed that eTran-DCTCP outperformed native Linux-DCTCP across every measured workload, while eTran-Homa retained an advantage in single-stream latency despite its lower-than-reported performance under concurrent workloads.
 
-Despite the architectural limitations that emerged under heavy Homa loads, the eTran approach is highly promising and useful in several real-world scenarios:
+Despite the architectural limitations that emerged under heavy Homa loads, the eTran approach remains promising and may be useful in several real-world scenarios:
 
-A Superior Replacement for Native Linux-DCTCP: eTran unequivocally outperforms standard Linux-DCTCP. It delivers up to 3.95x higher streaming throughput (achieving ~7.19 Gbps compared to Linux's 1.8-2.8 Gbps for 1KB streams). It also handles large-scale concurrency far better, processing 1,000 persistent TCP connections at roughly 2.8x the rate of the native kernel. Because of this massive performance upgrade, eTran-DCTCP is highly suitable for key-value databases (as demonstrated by the flexkvs workload tests).
+**A Strong Alternative to Native Linux-DCTCP:** eTran outperformed standard Linux-DCTCP in all measured TCP workloads. It delivered up to 3.95x higher streaming throughput, achieving ~7.19 Gbps compared to Linux's 1.8-2.8 Gbps for 1KB streams. It also handled large-scale concurrency better, processing 1,000 persistent TCP connections at roughly 2.8x the rate of the native kernel. These results suggest that eTran-DCTCP could be suitable for key-value databases, as demonstrated by the `flexkvs` workload tests.
 
-Unmatched CPU Efficiency for TCP: eTran is significantly more lightweight than the standard Linux stack. It consumes only about 2.93 CPU kcycles per request, making it approximately 2.5x more efficient than the ~7.4 kcycles required by the Linux TCP baseline.
+**Lower Measured CPU Cost for TCP:** eTran was also more CPU-efficient than the standard Linux stack. It consumed only about 2.93 CPU kcycles per request, compared with approximately 7.4 kcycles for the Linux TCP baseline.
 
-Conversely, the scalability results of the Homa protocol,especially concurrent throughput and the handling of high,frequency small RPCs,proved to be significantly lower than reported, though eTran still maintained a slight edge in single-stream latency.
-
-
-## Appendix
-
-You are asked to write this report using Markdown. You can find a cheat sheet
-of Markdown syntax at this [link](https://rust-lang.github.io/mdBook/format/markdown.html).
-
-For generating a PDF file from your report you can use a tool of your choice.
-*md2pdf* is one such tool. See this [link](https://pypi.org/project/md2pdf/)
-for more information about it. You can also use an online editor such as [this](https://www.md2pdf.io/).
-
+By contrast, eTran-Homa retained a slight advantage in single-stream latency but remained significantly below the reported results for concurrent throughput and high-frequency small RPCs. Thus, although the complete paper evaluation could not be reproduced, the results still demonstrate practical performance benefits for eTran, most clearly in the DCTCP workloads.
