@@ -273,12 +273,12 @@ We evaluated each configuration using three representative metrics: 32B latency 
 | `taskset`, NIC ring 4096, 2M hugepages                                                                      | 12.5        | 12.8      | 928        | No effect                        |
 
 **Key Discoveries:**
-*   **Relevant Baseline Settings:** In our configuration, disabling mitigations, C-states, and ASPM in GRUB was associated with latency below 15 us. The `performance` CPU governor and keeping SMT (Hyper-Threading) enabled were also associated with stable RPC rates.
-*   **Internal Microkernel Tuning:** The eTran root daemon (`micro_kernel`) automatically handles several tuning and setup tasks internally. It pins its own control loop (e.g., `CP_CPU=19`), pins application threads, and manages 2M hugepages for the AF_XDP UMEM. This built-in configuration renders manual OS-level interventions like `taskset` redundant and ineffective.
-*   **Detrimental Tunings:** Turning off Intel Turbo reduced the RPC rate by 39%, from 927 to 568 Kops. Disabling GRO and TSO also did not improve performance and was therefore reverted.
-*   **Limited Impact of Conventional Tuning:** The tested link-bound tunings, including disabling `irqbalance` and NUMA balancing, did not materially affect the measured workloads.
-*   **Likely Software Bottleneck:** The remaining throughput gap compared to the paper appears to be primarily software-related rather than caused by the tested OS-level settings. Potential contributors include `XDP_GEN` grant dispatch and BPF map contention, although additional profiling would be required to confirm the exact bottleneck.
 
+* **Relevant Baseline Settings:** In our configuration, disabling mitigations, C-states, and ASPM in GRUB was associated with latency below 15 us. The `performance` CPU governor and keeping SMT (Hyper-Threading) enabled were also associated with stable RPC rates.
+* **Internal Microkernel Tuning:** The eTran root daemon (`micro_kernel`) automatically handles several tuning and setup tasks internally. It pins its own control loop (e.g., `CP_CPU=19`), pins application threads, and manages 2M hugepages for the AF_XDP UMEM. This built-in configuration renders manual OS-level interventions like `taskset` redundant and ineffective.
+* **Detrimental Tunings:** Turning off Intel Turbo reduced the RPC rate by 39%, from 927 to 568 Kops. Disabling GRO and TSO also did not improve performance and was therefore reverted.
+* **Limited Impact of Conventional Tuning:** The tested link-bound tunings, including disabling `irqbalance` and NUMA balancing, did not materially affect the measured workloads.
+* **Likely Software Bottleneck:** The remaining throughput gap compared to the paper appears to be primarily software-related rather than caused by the tested OS-level settings. Potential contributors include `XDP_GEN` grant dispatch and BPF map contention, although additional profiling would be required to confirm the exact bottleneck.
 
 ## 7. Conclusion
 
