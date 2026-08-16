@@ -2,9 +2,9 @@
 
 **Team Members:**
 
-- Pierluigi Grossi, 10618314@polimi.it.
-- Matteo Franken, 10831046@polimi.it.
-- Lorenzo Chiroli, 10797603@polimi.it.
+- Pierluigi Grossi, <10618314@polimi.it>.
+- Matteo Franken, <10831046@polimi.it>.
+- Lorenzo Chiroli, <10797603@polimi.it>.
 
 **Source Paper:** Zhongjie Chen, Qingkai Meng, ChonLam Lao, Yifan Liu, Fengyuan Ren, Minlan Yu,
 and Yang Zhou: eTran: Extensible Kernel Transport with eBPF. In "22nd USENIX
@@ -23,13 +23,13 @@ _Project URL_: <https://github.com/lorenzo-cmyk/PF_NC_2025_26>
 
 ## **1. Introduction**
 
-#### **1. Motivation and Intuition**
+### **1. Motivation and Intuition**
 
 The central contribution of eTran is a safe and extensible kernel transport framework that combines the protection of kernel networking with the development speed and performance techniques usually associated with user-space transports.
 
-* **Limits of the native kernel stack (Linux TCP):** Modifying the Linux transport stack takes years. DCTCP took four years to enter the mainline kernel, MPTCP took almost a decade, and Homa, proposed in 2018, remains an external module. The traditional data path also has high costs due to socket and file system abstractions, heavy `sk_buff` structures, and repeated context switches for I/O system calls.
-* **Risks of Kernel Bypass (User Space/DPDK):** Moving transport into user space enables fast evolution, but it removes kernel isolation and protection. A bug, crash, or malicious behavior in an application can alter acknowledgments, sequence numbers, or timers. It can also compromise the correctness of other tenants and prevent the kernel from enforcing global security policies, firewalling, and telemetry.
-* **The eBPF solution and recent enablers:** eTran keeps transport state inside protected eBPF maps in the kernel, separate from application memory, with program safety checked by the statically verified eBPF verifier. Recent eBPF advances in the Linux kernel make this approach feasible today: `dynptr` in version 5.19, dynamic memory allocation in version 6.1, `rbtree` support in version 6.3, and new `kfuncs` allow eBPF programs to manage complex data structures that were previously impractical.
+- **Limits of the native kernel stack (Linux TCP):** Modifying the Linux transport stack takes years. DCTCP took four years to enter the mainline kernel, MPTCP took almost a decade, and Homa, proposed in 2018, remains an external module. The traditional data path also has high costs due to socket and file system abstractions, heavy `sk_buff` structures, and repeated context switches for I/O system calls.
+- **Risks of Kernel Bypass (User Space/DPDK):** Moving transport into user space enables fast evolution, but it removes kernel isolation and protection. A bug, crash, or malicious behavior in an application can alter acknowledgments, sequence numbers, or timers. It can also compromise the correctness of other tenants and prevent the kernel from enforcing global security policies, firewalling, and telemetry.
+- **The eBPF solution and recent enablers:** eTran keeps transport state inside protected eBPF maps in the kernel, separate from application memory, with program safety checked by the statically verified eBPF verifier. Recent eBPF advances in the Linux kernel make this approach feasible today: `dynptr` in version 5.19, dynamic memory allocation in version 6.1, `rbtree` support in version 6.3, and new `kfuncs` allow eBPF programs to manage complex data structures that were previously impractical.
 
 #### **2. Limits of Standard eBPF and Linux Kernel Patches**
 
@@ -44,13 +44,14 @@ Native eBPF/XDP was designed for ingress inspection and lacks the capabilities r
 
 eTran is organized into three components:
 
-* **Control Path Daemon (Root User-Space Process):** A centralized manager with `root` privileges (the `micro_kernel` process) creates AF_XDP sockets, allocates UMEM, loads eBPF programs into the kernel, and manages connection handshakes such as the TCP SYN and ACK exchange. It runs floating-point congestion control by updating eBPF maps through shared `BPF_F_MMAPABLE` memory and handles retransmissions after severe timeouts.
-* **Kernel Data Path (eBPF):** The transport engine runs inside the kernel. It performs high-speed I/O in the softirq and NAPI contexts while keeping connection state, timers, windows, and sequence numbers in protected BPF maps.
-* **User Transport Library (`LD_PRELOAD` or RPC API):** An unprivileged library that is the application's only way onto the eBPF data path, since direct access requires `root` privileges and queue multiplexing and eTran deliberately does not trust applications with it. The library exposes a **Virtual AF_XDP Socket** and translates application calls into operations on shared AF_XDP ring buffers, so the application never touches kernel state directly. It can be linked at compile time, exposing both an RPC API and a new Socket API, or injected dynamically into an existing binary via `LD_PRELOAD`; the latter is possible because the Socket API is POSIX-compliant, making it a drop-in replacement for the standard socket interface.
+- **Control Path Daemon (Root User-Space Process):** A centralized manager with `root` privileges (the `micro_kernel` process) creates AF_XDP sockets, allocates UMEM, loads eBPF programs into the kernel, and manages connection handshakes such as the TCP SYN and ACK exchange. It runs floating-point congestion control by updating eBPF maps through shared `BPF_F_MMAPABLE` memory and handles retransmissions after severe timeouts.
+- **Kernel Data Path (eBPF):** The transport engine runs inside the kernel. It performs high-speed I/O in the softirq and NAPI contexts while keeping connection state, timers, windows, and sequence numbers in protected BPF maps.
+- **User Transport Library (`LD_PRELOAD` or RPC API):** An unprivileged library that is the application's only way onto the eBPF data path, since direct access requires `root` privileges and queue multiplexing and eTran deliberately does not trust applications with it. The library exposes a **Virtual AF_XDP Socket** and translates application calls into operations on shared AF_XDP ring buffers, so the application never touches kernel state directly. It can be linked at compile time, exposing both an RPC API and a new Socket API, or injected dynamically into an existing binary via `LD_PRELOAD`; the latter is possible because the Socket API is POSIX-compliant, making it a drop-in replacement for the standard socket interface.
 
 <img src="Figures/eTran_Architecture.png" alt="eTran Architecture" style="height: 5cm; width: auto;">
 
 ##### **Practical Connection Lifecycle:**
+
 1. **Setup and Handshake (Control Plane):** The application triggers a connection request: for example, it calls `socket()` or `connect()` through the Socket API, or it uses the RPC API directly. Either way, the library intercepts or translates the call and sends a request through **LRPC** to the root daemon. All privileged setup happens here, on the daemon's side: it creates the AF_XDP socket (which requires `root`/`CAP_NET_RAW`), allocates the UMEM as shared memory (`/dev/shm`), binds the socket to a NIC queue, and loads the eBPF programs. It then passes the already-configured socket file descriptor to the application through a Unix socket (`SCM_RIGHTS` fd passing), so that the unprivileged application can `mmap` the rings and the UMEM pages into its address space. The daemon also manages the network SYN/ACK handshake and installs the control information in the kernel's eBPF maps.
 2. **Data Transfer (Direct Data Plane - Daemon Bypassed):** After setup, the daemon is out of the data path. During `write()`, the application copies data into the shared UMEM pages and submits descriptors on the TX ring. The `XDP_EGRESS` hook validates each packet (checking the `umem_id` against the pool registered for the connection), applies headers and pacing through the BPF maps, and transmits the packets. During `read()`, the `XDP` hook validates incoming packets, updates BPF state, and places them in the AF_XDP receive ring, where the application reads them directly.
 3. **Trust Boundary and Crash Isolation:** The application only ever touches its own UMEM buffers and ring descriptors. It cannot load eBPF programs, read the stateful BPF maps (windows, sequence numbers, timers), or access other tenants' data. If the application crashes or misbehaves, it can at worst corrupt its own buffers: the kernel's network state remains protected and intact.
@@ -63,7 +64,6 @@ To demonstrate the feasibility of the platform, the authors implemented two proo
 
 1. **TCP with DCTCP:** Built on classic **POSIX-like stream APIs**, it implements a connection-oriented, sender-driven transport with rate-based pacing.
 2. **Homa:** In addition to POSIX-like APIs, the authors developed **RPC message APIs** and implemented Homa as a connectionless, receiver-driven transport with credit- and priority-based scheduling using SRPT.
-
 
 ## **2. Selected Results**
 
@@ -86,47 +86,47 @@ The selected results compare the eTran transports with their Linux counterparts:
 
 The reproduction was conducted on a ten-node allocation at the CloudLab Utah site, the same testbed used for the original experiments. The evaluation therefore used the same `xl170` node type, Mellanox 2410 switch fabric, and official paper artifact as the authors, with all nodes connected directly to a single switch. The hardware, software, and runtime configuration are described below.
 
-#### **Hardware Environment**
+### **Hardware Environment**
 
 The cluster was provisioned at the CloudLab Utah site and contained ten physical nodes connected through the same rack switch:
 
-* **Cluster:** Ten `xl170` nodes in one rack on the CloudLab Utah site.
-* **CPU:** Single-socket Intel Xeon E5-2640 v4 at 2.40 GHz, with 10 physical cores and 20 logical CPUs per node.
-* **Memory:** 64 GB ECC DDR4 RAM per node.
-* **Storage:** A 16 GB CloudLab blockstore mounted at `/mydata` on each node.
-* **Network Card:** Mellanox ConnectX-4 Lx 25 GbE NIC using the `mlx5` driver.
-* **Network Switch:** Mellanox 2410 25 GbE rack switch.
+- **Cluster:** Ten `xl170` nodes in one rack on the CloudLab Utah site.
+- **CPU:** Single-socket Intel Xeon E5-2640 v4 at 2.40 GHz, with 10 physical cores and 20 logical CPUs per node.
+- **Memory:** 64 GB ECC DDR4 RAM per node.
+- **Storage:** A 16 GB CloudLab blockstore mounted at `/mydata` on each node.
+- **Network Card:** Mellanox ConnectX-4 Lx 25 GbE NIC using the `mlx5` driver.
+- **Network Switch:** Mellanox 2410 25 GbE rack switch.
 
 #### **Software Environment**
 
 The software environment was built from the official projects:
 
-* **Operating System:** Ubuntu 22.04 LTS.
-* **eTran:** the custom `6.6.0-eTran+` kernel (with the `XDP_EGRESS`, `XDP_GEN`, `BPF_MAP_TYPE_PKT_QUEUE`, and AF_XDP out-of-order completion patches), `micro_kernel`, `libetran.so`, and the Homa and TCP applications.
-* **Linux-Homa:** `PlatformLab/HomaModule`, providing the `cp_node` benchmark utility and the Homa kernel module, run on a separate Linux `v6.17.8` kernel.
-* **Linux-DCTCP:** the eTran kernel with standard Linux TCP configured for DCTCP and ECN, using the HomaModule `cp_node` utility.
-* **Repositories (pinned revisions):**
-  * `eTran` (`https://github.com/eTran-NSDI25/eTran`): `f26ef186`
-  * `eTran-linux` (`https://github.com/eTran-NSDI25/eTran-linux`): `3e960974`
-  * `HomaModule` (`https://github.com/PlatformLab/HomaModule`): `9edb9589`
-* **Compiler and libraries:** GCC/G++ 11.4.0, Clang/LLVM, `libbpf`, `libelf`, and the other dependencies installed from the Ubuntu 22.04 repositories, using the versions shipped by the distribution rather than pinned by the project.
+- **Operating System:** Ubuntu 22.04 LTS.
+- **eTran:** the custom `6.6.0-eTran+` kernel (with the `XDP_EGRESS`, `XDP_GEN`, `BPF_MAP_TYPE_PKT_QUEUE`, and AF_XDP out-of-order completion patches), `micro_kernel`, `libetran.so`, and the Homa and TCP applications.
+- **Linux-Homa:** `PlatformLab/HomaModule`, providing the `cp_node` benchmark utility and the Homa kernel module, run on a separate Linux `v6.17.8` kernel.
+- **Linux-DCTCP:** the eTran kernel with standard Linux TCP configured for DCTCP and ECN, using the HomaModule `cp_node` utility.
+- **Repositories (pinned revisions):**
+  - `eTran` (`https://github.com/eTran-NSDI25/eTran`): `f26ef186`
+  - `eTran-linux` (`https://github.com/eTran-NSDI25/eTran-linux`): `3e960974`
+  - `HomaModule` (`https://github.com/PlatformLab/HomaModule`): `9edb9589`
+- **Compiler and libraries:** GCC/G++ 11.4.0, Clang/LLVM, `libbpf`, `libelf`, and the other dependencies installed from the Ubuntu 22.04 repositories, using the versions shipped by the distribution rather than pinned by the project.
 
 #### **Configuration Parameters**
 
 The main system and network parameters were kept consistent across the benchmarks:
 
-* **Switch configuration:** The Mellanox 2410 was used with its default configuration, including a 70 KB ECN marking threshold and jumbo frames disabled, so the MTU was kept at 1500 bytes. CloudLab's documentation states that the switch is not exposed as a managed component, so its configuration could not be changed.
-* **NIC tuning:** RX and TX flow control were disabled, adaptive coalescing was turned off, and GRO and TSO remained enabled (disabling the offloads was found to hurt performance on this hardware).
-* **Kernel tuning:** Hyper-Threading (SMT) was enabled, kernel mitigations were disabled, CPU C-states were disabled, and PCIe ASPM was disabled. The `network-throughput` profile from `tuned` was enabled.
-* **eTran queues and CPU placement:** The `micro_kernel` used its default 20 NIC queues, with the control loop internally pinned to CPU 19 via `CP_CPU` and no external `taskset`.
-* **Network preparation:** Static ARP entries were installed for all nodes because eTran does not implement ARP in its data path; `/etc/hosts` entries let each node reference the others by hostname without DNS, as the benchmarks expect. The benchmark interface was `ens1f1np1`, with addresses in the `192.168.6.0/24` network.
-* **Stack-specific parameters:** The Linux-DCTCP baseline used `tcp_dctcp` as the congestion-control algorithm, enabled ECN with `net.ipv4.tcp_ecn=1`, and enabled TCP timestamps. The Linux-Homa evaluation installed the `homa` qdisc on the benchmark interface and set `net.homa.max_gso_size=100000` and `net.homa.hijack_tcp=0`.
+- **Switch configuration:** The Mellanox 2410 was used with its default configuration, including a 70 KB ECN marking threshold and jumbo frames disabled, so the MTU was kept at 1500 bytes. CloudLab's documentation states that the switch is not exposed as a managed component, so its configuration could not be changed.
+- **NIC tuning:** RX and TX flow control were disabled, adaptive coalescing was turned off, and GRO and TSO remained enabled (disabling the offloads was found to hurt performance on this hardware).
+- **Kernel tuning:** Hyper-Threading (SMT) was enabled, kernel mitigations were disabled, CPU C-states were disabled, and PCIe ASPM was disabled. The `network-throughput` profile from `tuned` was enabled.
+- **eTran queues and CPU placement:** The `micro_kernel` used its default 20 NIC queues, with the control loop internally pinned to CPU 19 via `CP_CPU` and no external `taskset`.
+- **Network preparation:** Static ARP entries were installed for all nodes because eTran does not implement ARP in its data path; `/etc/hosts` entries let each node reference the others by hostname without DNS, as the benchmarks expect. The benchmark interface was `ens1f1np1`, with addresses in the `192.168.6.0/24` network.
+- **Stack-specific parameters:** The Linux-DCTCP baseline used `tcp_dctcp` as the congestion-control algorithm, enabled ECN with `net.ipv4.tcp_ecn=1`, and enabled TCP timestamps. The Linux-Homa evaluation installed the `homa` qdisc on the benchmark interface and set `net.homa.max_gso_size=100000` and `net.homa.hijack_tcp=0`.
 
 ## **4. Experiment Results**
 
 This section reports only the values measured on the reproduction cluster. The comparison with the paper's reported results is deferred to Section 5.
 
-#### **4.1 Execution Procedure**
+### **4.1 Execution Procedure**
 
 The same basic procedure was used for each workload: stale processes and eTran shared-memory objects were cleaned up, the stack-specific setup was re-applied after each reboot, servers and the eTran `micro_kernel` were started in `screen` sessions, clients were launched with workload-specific timeouts and a 0.3 second stagger for multi-client tests, and the output was collected and read for the relevant metric.
 
@@ -200,7 +200,7 @@ For metric 22, the raw eTran figure was ~1357 kcycles including AF_XDP busy-poll
 
 The local measurements do not reproduce the reported evaluation as a whole: a few results are close, especially single-stream latency and some TCP workloads, but the main Homa scalability results show substantial gaps, and several experiments could not be reproduced with the available artifact. The comparison below uses the measurements from Section 4 and the values reported by the authors.
 
-#### **5.1 Homa Results**
+### **5.1 Homa Results**
 
 | Metric | Workload                                   | Measured (eTran-Homa) | Paper (eTran) | Delta |
 | ------ | ------------------------------------------ | --------------------: | ------------: | ----: |
@@ -262,7 +262,7 @@ We investigated whether OS-level tuning could improve the eTran Homa path on the
 
 We evaluated each configuration using three representative metrics: 32B latency (M1), 500KB throughput (M3), and 32B RPC rate (M5). The settings were applied incrementally, and the cluster was restarted before each measurement to ensure that each configuration was applied consistently.
 
-**Results Table (Cumulative Application)**
+#### **Results Table (Cumulative Application)**
 
 | Change applied                                                                                              | M1 P50 (us) | M3 (Gbps) | M5 (Kops)  | Verdict                          |
 | :---------------------------------------------------------------------------------------------------------- | :---------- | :-------- | :--------- | :------------------------------- |
@@ -274,11 +274,11 @@ We evaluated each configuration using three representative metrics: 32B latency 
 
 **Key Discoveries:**
 
-* **Relevant Baseline Settings:** In our configuration, disabling mitigations, C-states, and ASPM in GRUB was associated with latency below 15 us. The `performance` CPU governor and keeping SMT (Hyper-Threading) enabled were also associated with stable RPC rates.
-* **Internal Microkernel Tuning:** The eTran root daemon (`micro_kernel`) automatically handles several tuning and setup tasks internally. It pins its own control loop (e.g., `CP_CPU=19`), pins application threads, and manages 2M hugepages for the AF_XDP UMEM. This built-in configuration renders manual OS-level interventions like `taskset` redundant and ineffective.
-* **Detrimental Tunings:** Turning off Intel Turbo reduced the RPC rate by 39%, from 927 to 568 Kops. Disabling GRO and TSO also did not improve performance and was therefore reverted.
-* **Limited Impact of Conventional Tuning:** The tested link-bound tunings, including disabling `irqbalance` and NUMA balancing, did not materially affect the measured workloads.
-* **Likely Software Bottleneck:** The remaining throughput gap compared to the paper appears to be primarily software-related rather than caused by the tested OS-level settings. Potential contributors include `XDP_GEN` grant dispatch and BPF map contention, although additional profiling would be required to confirm the exact bottleneck.
+- **Relevant Baseline Settings:** In our configuration, disabling mitigations, C-states, and ASPM in GRUB was associated with latency below 15 us. The `performance` CPU governor and keeping SMT (Hyper-Threading) enabled were also associated with stable RPC rates.
+- **Internal Microkernel Tuning:** The eTran root daemon (`micro_kernel`) automatically handles several tuning and setup tasks internally. It pins its own control loop (e.g., `CP_CPU=19`), pins application threads, and manages 2M hugepages for the AF_XDP UMEM. This built-in configuration renders manual OS-level interventions like `taskset` redundant and ineffective.
+- **Detrimental Tunings:** Turning off Intel Turbo reduced the RPC rate by 39%, from 927 to 568 Kops. Disabling GRO and TSO also did not improve performance and was therefore reverted.
+- **Limited Impact of Conventional Tuning:** The tested link-bound tunings, including disabling `irqbalance` and NUMA balancing, did not materially affect the measured workloads.
+- **Likely Software Bottleneck:** The remaining throughput gap compared to the paper appears to be primarily software-related rather than caused by the tested OS-level settings. Potential contributors include `XDP_GEN` grant dispatch and BPF map contention, although additional profiling would be required to confirm the exact bottleneck.
 
 ## 7. Conclusion
 
