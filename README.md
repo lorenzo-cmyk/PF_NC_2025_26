@@ -1,7 +1,7 @@
 # Replicating: "eTran: extensible kernel transport with eBPF"
 
 - Deadline: 2026-08-28
-- Grade: N/D
+- Grade: 10/10
 
 ## Description
 
